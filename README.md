@@ -45,6 +45,8 @@ ansible-playbook site.yml --tags gw    # rebuild and restart just the daemon
 
 ## Checking it
 
+**[docs/OPERATIONS.md](docs/OPERATIONS.md)** covers watching MQTT and the logs, sending test traffic, and troubleshooting.
+
 ```bash
 python3 tools/test_node.py --gateway 192.168.8.110          # secured, net 0x42
 python3 tools/test_node.py --gateway 192.168.8.110 --open   # unsecured, net 0xF0
@@ -65,6 +67,6 @@ It goes out in the node's next reply window, and `roclink/in/42/ff01/down_status
 
 ## Not done yet
 
-- LoRa has only been tested as far as the concentrator starting and the forwarder connecting. No LoRa node has been heard yet.
+- LoRa downlink and reply timing haven't been checked on air yet. LoRa uplink works: a Heltec running `lora_secure_sender` is received.
 - Enrolled mode (per-node keys instead of the master on the gateway).
 - A gateway status or heartbeat topic (GATEWAY_INTERFACE.md open question 4).
