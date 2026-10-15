@@ -1,0 +1,5 @@
+- name: Restart roclink-gw
+  ansible.builtin.systemd:
+    name: roclink-gw
+    state: restarted
+    daemon_reload: true

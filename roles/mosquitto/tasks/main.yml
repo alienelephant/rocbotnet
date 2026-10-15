@@ -1,0 +1,57 @@
+- name: Install mosquitto
+  ansible.builtin.apt:
+    name: [mosquitto, mosquitto-clients]
+
+- name: Broker settings
+  ansible.builtin.template:
+    src: roclink.conf.j2
+    dest: /etc/mosquitto/conf.d/roclink.conf
+    mode: "0644"
+  notify: Restart mosquitto
+
+- name: ACL
+  ansible.builtin.template:
+    src: roclink.acl.j2
+    dest: /etc/mosquitto/roclink.acl
+    owner: root
+    group: mosquitto
+    mode: "0640"
+  notify: Restart mosquitto
+
+- name: Password file
+  ansible.builtin.copy:
+    dest: /etc/mosquitto/passwd
+    content: |
+      {% for user, pw in mqtt_users.items() %}
+      {{ user }}:{{ pw | mosquitto_hash(user) }}
+      {% endfor %}
+    owner: root
+    group: mosquitto
+    mode: "0640"
+  no_log: true
+  notify: Restart mosquitto
+
+- name: Mosquitto running
+  ansible.builtin.service:
+    name: mosquitto
+    state: started
+    enabled: true
+
+- name: Restart now if anything changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Check a password and the ACL (admin reads its own test publish)
+  ansible.builtin.shell: |
+    set -e
+    mosquitto_sub -h localhost -p {{ mqtt_port }} -u admin -P "$PW" -t roclink/test/ansible -C 1 -W 5 > /tmp/.mqtt-check &
+    sleep 1
+    mosquitto_pub -h localhost -p {{ mqtt_port }} -u admin -P "$PW" -t roclink/test/ansible -m ok -q 1
+    wait
+    cat /tmp/.mqtt-check
+    rm -f /tmp/.mqtt-check
+  environment:
+    PW: "{{ mqtt_users.admin }}"
+  register: mqtt_check
+  changed_when: false
+  failed_when: mqtt_check.stdout != "ok"
+  no_log: true

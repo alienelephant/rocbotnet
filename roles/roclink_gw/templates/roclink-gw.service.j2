@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+[Unit]
+Description=roclink gateway (LoRa via lora_pkt_fwd, Wi-Fi via UDP) to MQTT
+After=network-online.target mosquitto.service
+Wants=network-online.target lora_pkt_fwd.service
+
+[Service]
+User=roclink-gw
+ExecStart=/usr/local/bin/roclink-gw -c /etc/roclink-gw/gw.conf
+Restart=always
+RestartSec=5
+StateDirectory=roclink-gw
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

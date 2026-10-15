@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+gateway_id = {{ gateway_id }}
+state_dir = /var/lib/roclink-gw
+
+mqtt_host = localhost
+mqtt_port = {{ mqtt_port }}
+mqtt_user = roclink-gw
+mqtt_password_file = /etc/roclink-gw/mqtt.pass
+
+# LoRa, through lora_pkt_fwd on localhost
+semtech_bind = 127.0.0.1
+semtech_port = {{ sx1302_semtech_port }}
+lora_freq_hz = {{ lora.freq_hz }}
+lora_sf = {{ lora.sf }}
+lora_bw_khz = {{ lora.bw_khz }}
+lora_cr = {{ lora.cr }}
+lora_preamble = {{ lora.preamble }}
+lora_power = {{ lora.power_dbm }}
+lora_reply_delay_ms = {{ lora.reply_delay_ms }}
+
+# Wi-Fi nodes over UDP (0 = off)
+udp_bind = 0.0.0.0
+udp_port = {{ roclink_udp_port }}
+
+{% for n in roclink_nets %}
+{% if n.mode == 'secured' %}
+net = {{ n.id }} secured master_file=/etc/roclink-gw/net-{{ '%02x' | format(n.id | int(base=16)) }}.key
+{% else %}
+net = {{ n.id }} open
+{% endif %}
+{% endfor %}
+{% for p in roclink_policies %}
+{{ p }}
+{% endfor %}

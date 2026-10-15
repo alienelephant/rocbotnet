@@ -1,0 +1,40 @@
+diff --git i/libloragw/src/loragw_hal.c w/libloragw/src/loragw_hal.c
+index ffc8ec0..f7418f3 100644
+--- i/libloragw/src/loragw_hal.c
++++ w/libloragw/src/loragw_hal.c
+@@ -1113,8 +1113,10 @@ int lgw_start(void) {
+             }
+         }
+         if (i == sizeof I2C_PORT_TEMP_SENSOR) {
+-            printf("ERROR: no temperature sensor found.\n");
+-            return LGW_HAL_ERROR;
++            /* Boards without the CoreCell's STTS751 (Waveshare's HAT): RSSI
++             * compensation assumes 25 C instead. */
++            printf("WARNING: no temperature sensor found, assuming 25 C\n");
++            ts_fd = -1;
+         }
+ 
+         /* Configure ADC AD338R for full duplex (CN490 reference design) */
+@@ -1223,7 +1225,7 @@ int lgw_stop(void) {
+ 
+     if (CONTEXT_COM_TYPE == LGW_COM_SPI) {
+         DEBUG_MSG("INFO: Closing I2C for temperature sensor\n");
+-        x = i2c_linuxdev_close(ts_fd);
++        x = ts_fd < 0 ? 0 : i2c_linuxdev_close(ts_fd);
+         if (x != 0) {
+             printf("ERROR: failed to close I2C temperature sensor device (err=%i)\n", x);
+             err = LGW_HAL_ERROR;
+@@ -1597,7 +1599,12 @@ int lgw_get_temperature(float* temperature) {
+ 
+     switch (CONTEXT_COM_TYPE) {
+         case LGW_COM_SPI:
+-            err = stts751_get_temperature(ts_fd, ts_addr, temperature);
++            if (ts_fd < 0) {
++                *temperature = 25.0;
++                err = LGW_HAL_SUCCESS;
++            } else {
++                err = stts751_get_temperature(ts_fd, ts_addr, temperature);
++            }
+             break;
+         case LGW_COM_USB:
+             err = lgw_com_get_temperature(temperature);

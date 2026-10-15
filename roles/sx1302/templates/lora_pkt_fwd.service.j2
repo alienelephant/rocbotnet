@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Semtech SX1302 packet forwarder (LoRa radio for roclink-gw)
+After=network.target
+
+[Service]
+User=sx1302
+WorkingDirectory={{ sx1302_dir }}
+# stdbuf: the forwarder printf()s; line-buffer it so the journal gets each line as it happens
+ExecStart=/usr/bin/stdbuf -oL {{ sx1302_dir }}/lora_pkt_fwd -c {{ sx1302_dir }}/global_conf.json
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths={{ sx1302_dir }}
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

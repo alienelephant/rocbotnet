@@ -1,0 +1,28 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Power and reset for the SX1302 board, run by lora_pkt_fwd at start and
+# stop. Like Semtech's tools/reset_lgw.sh, but through pinctrl (BCM GPIO
+# numbers), which works on any kernel, and only with the pins this board has.
+#   ./reset_lgw.sh start | stop
+set_pin() { pinctrl set "$1" op "$2"; sleep 0.1; }
+
+case "$1" in
+start|stop)
+{% if sx1302_pins.power_en is defined %}
+    set_pin {{ sx1302_pins.power_en }} dh
+{% endif %}
+    # SX1302 reset is active high: a pulse resets the chip and its radios
+    echo "SX1302 reset through GPIO{{ sx1302_pins.reset }}"
+    set_pin {{ sx1302_pins.reset }} dh
+    set_pin {{ sx1302_pins.reset }} dl
+{% if sx1302_pins.sx1261_reset is defined %}
+    set_pin {{ sx1302_pins.sx1261_reset }} dl
+    set_pin {{ sx1302_pins.sx1261_reset }} dh
+{% endif %}
+    ;;
+*)
+    echo "usage: $0 start|stop" >&2
+    exit 1
+    ;;
+esac
+exit 0

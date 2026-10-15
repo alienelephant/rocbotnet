@@ -1,0 +1,99 @@
+# Semtech's SX1302 HAL and its packet forwarder (lora_pkt_fwd), which hands
+# every LoRa packet to roclink-gw over the Semtech UDP protocol on localhost.
+- name: System user for the packet forwarder (SPI, I2C, GPIO)
+  ansible.builtin.user:
+    name: sx1302
+    system: true
+    shell: /usr/sbin/nologin
+    groups: [spi, i2c, gpio]
+    create_home: false
+
+- name: Source
+  ansible.builtin.git:
+    repo: https://github.com/Lora-net/sx1302_hal.git
+    version: "{{ sx1302_hal_version }}"
+    dest: "{{ sx1302_dir }}/src"
+    depth: 1
+    update: false  # cloned once, then patched: to change version, delete the directory
+  register: hal_src
+
+# Waveshare's HAT has no STTS751 temperature sensor, which the stock HAL
+# refuses to start without. The patch assumes 25 C (used only for RSSI).
+- name: Patch for boards without a temperature sensor
+  ansible.builtin.copy:
+    src: no-temp-sensor.patch
+    dest: "{{ sx1302_dir }}/no-temp-sensor.patch"
+    mode: "0644"
+
+- name: Apply it
+  ansible.builtin.shell:
+    cmd: |
+      git apply --reverse --check ../no-temp-sensor.patch 2>/dev/null && exit 0
+      git apply ../no-temp-sensor.patch && echo applied
+    chdir: "{{ sx1302_dir }}/src"
+  register: hal_patch
+  changed_when: "'applied' in hal_patch.stdout"
+
+- name: Is it built?
+  ansible.builtin.stat:
+    path: "{{ sx1302_dir }}/src/packet_forwarder/lora_pkt_fwd"
+  register: hal_built
+
+- name: Build (newer GCC needs -fcommon for this release)
+  ansible.builtin.command:
+    cmd: make -j4 CC="gcc -fcommon"
+    chdir: "{{ sx1302_dir }}/src"
+  when: hal_src is changed or hal_patch is changed or not hal_built.stat.exists
+  register: hal_build
+  changed_when: true
+
+- name: Install lora_pkt_fwd
+  ansible.builtin.copy:
+    src: "{{ sx1302_dir }}/src/packet_forwarder/lora_pkt_fwd"
+    dest: "{{ sx1302_dir }}/lora_pkt_fwd"
+    remote_src: true
+    mode: "0755"
+  notify: Restart lora_pkt_fwd
+
+- name: Install the chip-id tool (reads the concentrator's EUI)
+  ansible.builtin.copy:
+    src: "{{ sx1302_dir }}/src/util_chip_id/chip_id"
+    dest: "{{ sx1302_dir }}/chip_id"
+    remote_src: true
+    mode: "0755"
+
+# lora_pkt_fwd runs ./reset_lgw.sh from its working directory at start and
+# stop. Semtech's uses sysfs GPIO numbers, which changed on 6.x kernels;
+# this one uses pinctrl.
+- name: Reset script
+  ansible.builtin.template:
+    src: reset_lgw.sh.j2
+    dest: "{{ sx1302_dir }}/reset_lgw.sh"
+    mode: "0755"
+  notify: Restart lora_pkt_fwd
+
+- name: Packet forwarder config
+  ansible.builtin.template:
+    src: global_conf.json.j2
+    dest: "{{ sx1302_dir }}/global_conf.json"
+    mode: "0644"
+  notify: Restart lora_pkt_fwd
+
+- name: Working directory (the HAL writes its log here)
+  ansible.builtin.file:
+    path: "{{ sx1302_dir }}"
+    owner: sx1302
+    mode: "0755"
+
+- name: Service
+  ansible.builtin.template:
+    src: lora_pkt_fwd.service.j2
+    dest: /etc/systemd/system/lora_pkt_fwd.service
+    mode: "0644"
+  notify: Restart lora_pkt_fwd
+
+- name: Enabled
+  ansible.builtin.systemd:
+    name: lora_pkt_fwd
+    enabled: true
+    daemon_reload: true
