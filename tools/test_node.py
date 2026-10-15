@@ -48,7 +48,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--gateway", required=True)
     p.add_argument("--port", type=int, default=3333)
-    p.add_argument("--node", type=lambda s: int(s, 16), default=0x1234)
+    p.add_argument("--node", type=lambda s: int(s, 16), default=0x7E57,
+                   help="node address in hex (default 7E57; not one a real node uses, or its counter wins)")
     p.add_argument("--open", action="store_true", help="unsecured, on the open test net 0xF0")
     p.add_argument("--net", type=lambda s: int(s, 0))
     p.add_argument("--master", help="network master key, 32 hex digits (default: the demo key)")
