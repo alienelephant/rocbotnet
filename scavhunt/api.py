@@ -18,21 +18,24 @@ from importlib.resources import files
 from urllib.parse import parse_qs, urlparse
 
 from .game import Game
+from .service import now_ms as s_now
 from .store import Store
 
 log = logging.getLogger(__name__)
 
 
-def run_view(game: Game, store: Store) -> dict:
+def run_view(game: Game, store: Store, now: int | None = None) -> dict:
     rid = store.current_run_id(game)
     boxes = [
-        {"id": b.id, "name": b.name, "requires": list(b.requires), "required": b.required}
+        {"id": b.id, "name": b.name, "requires": list(b.requires), "required": b.required,
+         "points": b.points, "hints": len(b.hint_penalties_s)}
         for b in game.boxes.values()
     ]
     view = {"game": game.id, "title": game.title, "boxes": boxes, "run": None}
     if rid is None:
         return view
     run = store.load(game, rid)
+    now = now if now is not None else s_now()
     view["run"] = {
         "id": run.id,
         "state": run.state,
@@ -40,6 +43,12 @@ def run_view(game: Game, store: Store) -> dict:
         "deadline": run.deadline,
         "ended_at": run.ended_at,
         "winner": run.winner(),
+        "session_timeout_s": game.session_timeout_s,
+        "sessions": {
+            bid: {"team": s.team, "start": s.start, "last": s.last}
+            for bid in game.boxes
+            if (s := run.session_at(bid, now)) is not None
+        },
         "teams": [
             {
                 "team": t.id,
@@ -55,9 +64,14 @@ def run_view(game: Game, store: Store) -> dict:
     return view
 
 
-def standings(game: Game, store: Store) -> list[dict]:
+def standings(game: Game, store: Store, now: int | None = None) -> list[dict]:
     rid = store.current_run_id(game)
-    return store.load(game, rid).standings() if rid else []
+    if not rid:
+        return []
+    run = store.load(game, rid)
+    if now is None:
+        now = run.ended_at if run.state == "ended" else s_now()
+    return run.standings(now)
 
 
 def serve(game: Game, db_path: str, host: str, port: int) -> None:

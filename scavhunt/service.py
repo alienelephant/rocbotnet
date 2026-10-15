@@ -1,8 +1,9 @@
 """The game as a roclink hub service (docs/GAME.md §8).
 
 The hub delivers each box's uplink to roclink/svc/<service>/up, already
-verified, decrypted and de-duplicated across gateways. For a WIN, the service
-judges the claim, stores it, and asks the hub to send the box its VERDICT on
+verified, decrypted and de-duplicated across gateways. The service
+judges a box's message (START, WIN, HINT, WRONG, END), stores it with its
+verdict, and asks the hub to send the box its VERDICT on
 roclink/svc/<service>/down. The hub answers on .../down_status.
 
 `Service` holds the logic and returns what to publish; `run()` wires it to
@@ -20,7 +21,7 @@ import time
 from dataclasses import dataclass
 
 from . import messages as msg
-from .game import Game, GameError, Run, Verdict
+from .game import Game, GameError, Reply, Run, Verdict
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -95,13 +96,13 @@ class Service:
         if box is None:
             log.warning("uplink from 0x%02X/0x%04X, which isn't a box in %s", net, src, self.game.id)
             return []
-        if schema not in (msg.SCHEMA_WIN, msg.SCHEMA_ATTEMPT):
+        if schema not in msg.UPLINKS:
             return []  # a box's own telemetry, say: not the game's business
         if rec.get("sec") != "enc" and not self.cfg.allow_insecure:
             log.warning("refusing %s from box %s: security %s, not enc", schema, box.id, rec.get("sec"))
             return []
         try:
-            token = msg.parse_token_message(payload)
+            token, hint = msg.parse_box_message(schema, payload)
         except msg.MessageError as e:
             log.warning("bad message from box %s: %s", box.id, e)
             return []
@@ -115,30 +116,45 @@ class Service:
                 log.info("repeat of %s, already handled", uplink)
                 return []
 
+        replies = schema in (msg.SCHEMA_WIN, msg.SCHEMA_START, msg.SCHEMA_HINT)
         self.refresh()
         if self.run is None:
-            log.warning("WIN at box %s, but no run has been created", box.id)
-            return self._verdict_down(box, Verdict.NOT_RUNNING, 0, 0, None, None) if schema == msg.SCHEMA_WIN else []
+            log.warning("message at box %s, but no run has been created", box.id)
+            return self._verdict_down(box, Reply(Verdict.NOT_RUNNING, None, box.id, 0, 0), None) if replies else []
 
-        with self.store.change(self.run) as append:
-            if schema == msg.SCHEMA_ATTEMPT:
-                append({"kind": "attempt", "at": at, "box": box.id, "token": token.hex(),
-                        "team": self.run.tokens.get(token)}, uplink)
+        run = self.run
+        with self.store.change(run) as append:
+            ev = {"at": at, "box": box.id, "token": token.hex()}
+            if schema in (msg.SCHEMA_WRONG, msg.SCHEMA_END):
+                team = run.in_session(token, box, at)
+                kind = "wrong" if schema == msg.SCHEMA_WRONG else "end"
+                ev.update(kind=kind, team=team or run.tokens.get(token), counted=team is not None)
+                append(ev, uplink)
+                log.info("box %s, team %s: %s%s", box.id, ev["team"] or "?", kind,
+                         "" if team else " (no session, not counted)")
                 return []
-            r = self.run.judge(token, box, at)
-            eid = append({"kind": "claim", "at": at, "box": box.id, "token": token.hex(),
-                          "team": r.team, "verdict": int(r.verdict)}, uplink)
-        log.info("box %s, team %s: %s (%d of %d)", box.id, r.team or "?", r.verdict.name.lower(),
-                 r.solved_required, r.required_total)
-        return self._verdict_down(box, r.verdict, r.solved_required, r.required_total, r.needs, eid)
+            if schema == msg.SCHEMA_START:
+                r = run.judge_start(token, box, at)
+                ev["kind"] = "start"
+            elif schema == msg.SCHEMA_HINT:
+                r = run.judge_hint(token, box, hint, at)
+                ev.update(kind="hint", n=hint)
+            else:
+                r = run.judge_win(token, box, at)
+                ev["kind"] = "claim"
+            ev.update(team=r.team, verdict=int(r.verdict))
+            eid = append(ev, uplink)
+        log.info("box %s, team %s: %s %s, %s (%d of %d)", box.id, r.team or "?", ev["kind"],
+                 r.verdict.name.lower(), r.arg, r.solved_required, r.required_total)
+        return self._verdict_down(box, r, eid)
 
-    def _verdict_down(self, box, verdict, solved, total, needs, eid) -> list[tuple[str, bytes]]:
-        needs_node = self.game.boxes[needs].node if needs else 0
+    def _verdict_down(self, box, r: Reply, eid) -> list[tuple[str, bytes]]:
+        arg = self.game.boxes[r.needs].node if r.needs else r.arg
         body = {
             "net": box.net,
             "node": f"0x{box.node:04X}",
             "schema": msg.SCHEMA_VERDICT,
-            "payload": msg.verdict(verdict, solved, total, needs_node).hex(),
+            "payload": msg.verdict(r.verdict, r.solved_required, r.required_total, arg).hex(),
             "ack": True,
             "ttl_s": self.cfg.verdict_ttl_s,
             "ref": f"{self.run.id}:{eid}" if self.run and eid else f"verdict:{box.id}",

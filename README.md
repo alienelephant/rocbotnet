@@ -1,6 +1,6 @@
 # roclink scavenger hunt
 
-An IoT scavenger hunt played with [roclink](../roclink-rfc). Teams solve physical puzzle boxes; each box has a roclink node in it. When a team solves a box, the team taps its card on it and the box sends a `WIN`. This service judges the claim, records it, and sends the box its verdict. The first team to solve every required box wins.
+An IoT scavenger hunt played with [roclink](../roclink-rfc). Teams solve physical puzzle boxes; each box has a roclink node in it. A team taps its card on a box to start playing it, and the game times the team at that box. Hints and wrong answers cost time, and solving a box earns points. This service judges each message a box sends, records it, and sends the box its verdict. Teams that solve every required box finish, and are ranked by points, then by time.
 
 - **[docs/GAME.md](docs/GAME.md)** is the game: vocabulary, the formal model, rules, flows, the messages on the wire, and how cheating is stopped.
 - **`scavhunt/`** is the backend, a roclink hub service over MQTT.
@@ -17,8 +17,8 @@ The hub verifies, decrypts and de-duplicates the boxes' frames, then delivers th
 
 | File | What it does |
 |---|---|
-| `scavhunt/game.py` | The rules (GAME.md §3, §4): game definitions, runs, claims, standings. No I/O |
-| `scavhunt/messages.py` | `WIN`, `ATTEMPT`, `VERDICT` and `CONTROL` payloads (GAME.md §6) |
+| `scavhunt/game.py` | The rules (GAME.md §3, §4): game definitions, runs, sessions, hints, penalties, claims, standings. No I/O |
+| `scavhunt/messages.py` | `START`, `WIN`, `HINT`, `WRONG`, `END`, `VERDICT` and `CONTROL` payloads (GAME.md §6) |
 | `scavhunt/store.py` | The append-only event log in SQLite. A run's state is its events replayed |
 | `scavhunt/service.py` | The hub service: records in, verdicts out |
 | `scavhunt/api.py` | Read-only HTTP: the scoreboard page, `/api/run`, `/api/standings`, `/api/events` |
@@ -28,7 +28,7 @@ The hub verifies, decrypts and de-duplicates the boxes' frames, then delivers th
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
-cp game.example.toml game.toml        # your boxes' addresses, prerequisites, time limit
+cp game.example.toml game.toml        # your boxes: addresses, prerequisites, points, penalties
 scavhunt check                         # validates it, shows which boxes open first
 
 scavhunt serve &                       # the service and the scoreboard (http://127.0.0.1:8090)
@@ -37,7 +37,7 @@ scavhunt team red  --name "Red"  --token 04:a1:b2:c3:d4:e5:f6
 scavhunt team blue --name "Blue" --token text:BLUE42
 scavhunt start
 scavhunt status                        # standings in the terminal
-scavhunt control tower reset           # tell a box to reset its puzzle
+scavhunt control tower reset           # reset a box's puzzle (ends the session there)
 scavhunt solve blue lab --note "box was offline"   # an operator correction (and unsolve)
 scavhunt end                           # or the time limit, or every team finishing
 ```

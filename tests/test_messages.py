@@ -3,18 +3,20 @@ import pytest
 from scavhunt import messages as m
 
 
-def test_token_message_round_trip():
+def test_box_message_round_trip():
     for token in (b"\x01", b"\x04\xa1\xb2\xc3\xd4\xe5\xf6", b"x" * 16):
-        assert m.parse_token_message(m.token_message(token)) == token
+        assert m.parse_box_message(m.SCHEMA_WIN, m.box_message(token)) == (token, None)
+    assert m.parse_box_message(m.SCHEMA_HINT, m.box_message(b"AB", 3)) == (b"AB", 3)
 
 
 @pytest.mark.parametrize(
-    "payload",
-    [b"", b"\x01", b"\x02\x01A", b"\x01\x00", b"\x01\x11" + b"x" * 17, b"\x01\x02A", b"\x01\x01AB"],
+    "schema, payload",
+    [(1, b""), (1, b"\x01"), (1, b"\x02\x01A"), (1, b"\x01\x00"), (1, b"\x01\x11" + b"x" * 17),
+     (1, b"\x01\x02A"), (1, b"\x01\x01AB"), (4, b"\x01\x01A"), (4, b"\x01\x01A\x01\x02")],
 )
-def test_bad_token_messages(payload):
+def test_bad_box_messages(schema, payload):
     with pytest.raises(m.MessageError):
-        m.parse_token_message(payload)
+        m.parse_box_message(schema, payload)
 
 
 def test_verdict_layout():

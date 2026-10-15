@@ -18,6 +18,8 @@
          border: 1px solid var(--line); color: var(--dim); font-size: .8rem; }
   .box.solved { background: var(--ok); border-color: var(--ok); color: #0b1a12; }
   .box.open { border-color: var(--open); color: var(--open); }
+  .box.playing { border-color: var(--open); background: var(--open); color: #1d1606; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .done { color: var(--ok); font-weight: 600; }
   .clock { font-variant-numeric: tabular-nums; font-size: 1.3rem; }
 </style>
@@ -25,10 +27,10 @@
 <body>
 <h1 id="title">Scavenger hunt</h1>
 <div class="meta"><span id="state"></span> <span class="clock" id="clock"></span></div>
-<table>
-  <thead><tr><th>#</th><th>Team</th><th>Solved</th><th>Boxes</th></tr></thead>
+<div style="overflow-x:auto"><table>
+  <thead><tr><th>#</th><th>Team</th><th>Points</th><th>Time</th><th>Solved</th><th>Boxes</th></tr></thead>
   <tbody id="rows"></tbody>
-</table>
+</table></div>
 <script>
 let view = null, rank = [];
 const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000));
@@ -50,12 +52,14 @@ function render() {
   document.getElementById("rows").innerHTML = rank.map(r => {
     const t = teams[r.team] || {solved: {}, open: []};
     const boxes = view.boxes.map(b => {
-      const cls = b.id in t.solved ? "solved" : t.open.includes(b.id) ? "open" : "";
+      const s = run && run.sessions[b.id];
+      const cls = b.id in t.solved ? "solved" : s && s.team === r.team ? "playing" : t.open.includes(b.id) ? "open" : "";
       return `<span class="box ${cls}">${esc(b.name)}${b.required ? "" : " ★"}</span>`;
     }).join("");
-    const done = r.finished_at ? `<span class="done">finished ${fmt(r.finished_at - run.started_at)}</span>`
-                               : `${r.required_solved} / ${r.required_total}`;
-    return `<tr><td class="rank">${r.rank}</td><td>${esc(r.name)}</td><td>${done}</td><td>${boxes}</td></tr>`;
+    const done = r.finished_at ? `<span class="done">finished</span>` : `${r.required_solved} / ${r.required_total}`;
+    const extra = r.hints || r.wrong ? `<br><small>${r.hints} hints, ${r.wrong} wrong</small>` : "";
+    return `<tr><td class="rank">${r.rank}</td><td>${esc(r.name)}</td><td class="num">${r.points}</td>` +
+           `<td class="num">${fmt(r.time_ms)}${extra}</td><td>${done}</td><td>${boxes}</td></tr>`;
   }).join("");
 }
 

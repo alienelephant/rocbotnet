@@ -1,9 +1,12 @@
 """The game's rules, with no I/O (docs/GAME.md §3 and §4).
 
-A `Game` is a definition: boxes, prerequisites, which boxes are required, a
-time limit. A `Run` is one playing of it. Every change to a run is an event
-(a plain dict); `Run.apply()` is the only thing that changes state, so a run
-can be rebuilt by replaying its events from the log in order.
+A `Game` is a definition: boxes, prerequisites, points and penalties, which
+boxes are required, a session timeout and a time limit. A `Run` is one
+playing of it. Every change to a run is an event (a plain dict);
+`Run.apply()` is the only thing that changes state, so a run can be rebuilt
+by replaying its events from the log in order. The `judge_*` methods decide
+a box message's verdict without changing anything; the caller stores the
+verdict in an event and applies it.
 """
 
 from __future__ import annotations
@@ -28,6 +31,9 @@ class Box:
     node: int
     requires: tuple[str, ...] = ()
     required: bool = True
+    points: int = 100
+    hint_penalties_s: tuple[int, ...] = ()  # hint i costs hint_penalties_s[i-1]
+    wrong_penalty_s: int = 0
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,7 @@ class Game:
     title: str
     boxes: dict[str, Box]  # in declaration order
     time_limit_s: int | None = None
+    session_timeout_s: int = 20 * 60
 
     @property
     def required(self) -> list[str]:
@@ -68,6 +75,9 @@ def parse_game(raw: dict) -> Game:
                 node=int(b["node"]),
                 requires=tuple(b.get("requires", [])),
                 required=bool(b.get("required", True)),
+                points=int(b.get("points", g.get("points", 100))),
+                hint_penalties_s=tuple(int(p) for p in b.get("hint_penalty_s", g.get("hint_penalty_s", []))),
+                wrong_penalty_s=int(b.get("wrong_penalty_s", g.get("wrong_penalty_s", 0))),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise GameError(f"[[box]] {b.get('id', '?')}: {e}") from None
@@ -75,6 +85,12 @@ def parse_game(raw: dict) -> Game:
             raise GameError(f"box {box.id} is defined twice")
         if not 0x0001 <= box.node <= 0xFEFF:
             raise GameError(f"box {box.id}: node 0x{box.node:04X} isn't a roclink node address")
+        if box.points < 0 or box.wrong_penalty_s < 0 or any(p < 0 for p in box.hint_penalties_s):
+            raise GameError(f"box {box.id}: points and penalties can't be negative")
+        if list(box.hint_penalties_s) != sorted(box.hint_penalties_s):
+            raise GameError(f"box {box.id}: each hint must cost at least as much as the one before")
+        if len(box.hint_penalties_s) > 255:
+            raise GameError(f"box {box.id}: at most 255 hints")
         boxes[box.id] = box
     if not boxes:
         raise GameError("a game needs at least one [[box]]")
@@ -87,7 +103,11 @@ def parse_game(raw: dict) -> Game:
                 raise GameError(f"box {b.id} requires unknown box {r}")
     _check_acyclic(boxes)
     limit = g.get("time_limit_min")
-    game = Game(g["id"], g.get("title", g["id"]), boxes, int(limit * 60) if limit else None)
+    timeout = g.get("session_timeout_min", 20)
+    if not timeout or timeout <= 0:
+        raise GameError("session_timeout_min must be positive")
+    game = Game(g["id"], g.get("title", g["id"]), boxes,
+                int(limit * 60) if limit else None, int(timeout * 60))
     if not game.required:
         raise GameError("at least one box must be required")
     return game
@@ -122,10 +142,22 @@ class Verdict(IntEnum):
     LOCKED = 3
     UNKNOWN_TEAM = 4
     NOT_RUNNING = 5
+    GO = 6
+    BUSY = 7
+    NO_SESSION = 8
+    HINT = 9
+    NO_MORE_HINTS = 10
 
     @property
     def accepted(self) -> bool:
         return self in (Verdict.ACCEPTED, Verdict.FINISHED)
+
+
+@dataclass
+class Session:
+    team: str
+    start: int
+    last: int  # the time of its latest message
 
 
 @dataclass
@@ -135,16 +167,23 @@ class Team:
     tokens: set[bytes] = field(default_factory=set)
     solved: dict[str, int] = field(default_factory=dict)  # box id -> hub time (ms)
     finished_at: int | None = None
+    box_time: dict[str, int] = field(default_factory=dict)  # box id -> ms in closed sessions
+    hints: dict[str, int] = field(default_factory=dict)  # box id -> hints taken
+    wrong: dict[str, int] = field(default_factory=dict)  # box id -> wrong attempts in sessions
+    penalty_ms: int = 0
 
 
 @dataclass(frozen=True)
-class ClaimResult:
+class Reply:
+    """A verdict, and what the box is told with it."""
+
     verdict: Verdict
     team: str | None
     box: str
     solved_required: int
     required_total: int
-    needs: str | None = None  # for LOCKED: a box to solve first
+    needs: str | None = None  # LOCKED: a box to solve first
+    arg: int = 0  # GO: hints taken; BUSY: seconds left; HINT: its number; NO_MORE_HINTS: how many
 
 
 class Run:
@@ -158,6 +197,7 @@ class Run:
         self.ended_at: int | None = None
         self.teams: dict[str, Team] = {}
         self.tokens: dict[bytes, str] = {}
+        self.sessions: dict[str, Session] = {}  # box id -> its open session
         self.last_event = 0  # the id of the last stored event applied (store.py)
 
     # --------------------------------------------------------- queries
@@ -168,8 +208,17 @@ class Run:
             return None
         return self.started_at + self.game.time_limit_s * 1000
 
+    @property
+    def timeout_ms(self) -> int:
+        return self.game.session_timeout_s * 1000
+
     def running_at(self, now: int) -> bool:
         return self.state == "running" and (self.deadline is None or now < self.deadline)
+
+    def session_at(self, box_id: str, now: int) -> Session | None:
+        """The box's open session, unless it has timed out by `now`."""
+        s = self.sessions.get(box_id)
+        return s if s is not None and now < s.last + self.timeout_ms else None
 
     def is_open_for(self, team: Team, box: Box) -> bool:
         return all(r in team.solved for r in box.requires)
@@ -195,17 +244,26 @@ class Run:
     def required_solved(self, team: Team) -> int:
         return sum(1 for b in self.game.required if b in team.solved)
 
-    def standings(self) -> list[dict]:
-        """docs/GAME.md §3: finished first by finish time, then by required
-        boxes solved, then by last solve time, then optional boxes solved."""
+    def points(self, team: Team) -> int:
+        return sum(self.game.boxes[b].points for b in team.solved)
+
+    def time_ms(self, team: Team, now: int | None = None) -> int:
+        """Box time plus penalties. With `now`, open sessions count up to it."""
+        t = sum(team.box_time.values()) + team.penalty_ms
+        if now is not None:
+            for s in self.sessions.values():
+                if s.team == team.id:
+                    t += max(0, min(now, s.last + self.timeout_ms) - s.start)
+        return t
+
+    def standings(self, now: int | None = None) -> list[dict]:
+        """docs/GAME.md §3: finished first, then points, then time, then the
+        time of the last solve."""
         required = set(self.game.required)
 
         def key(t: Team):
             last = max(t.solved.values(), default=float("inf"))
-            optional = sum(1 for b in t.solved if b not in required)
-            if t.finished_at is not None:
-                return (0, t.finished_at, 0, 0, 0)
-            return (1, 0, -self.required_solved(t), last, -optional)
+            return (t.finished_at is None, -self.points(t), self.time_ms(t, now), last)
 
         ranked = sorted(self.teams.values(), key=key)
         return [
@@ -213,9 +271,13 @@ class Run:
                 "rank": i + 1,
                 "team": t.id,
                 "name": t.name,
+                "points": self.points(t),
+                "time_ms": self.time_ms(t, now),
                 "solved": sorted(t.solved, key=lambda b: t.solved[b]),
                 "required_solved": self.required_solved(t),
                 "required_total": len(required),
+                "hints": sum(t.hints.values()),
+                "wrong": sum(t.wrong.values()),
                 "finished_at": t.finished_at,
             }
             for i, t in enumerate(ranked)
@@ -225,32 +287,80 @@ class Run:
         s = self.standings()
         return s[0]["team"] if s and s[0]["finished_at"] is not None else None
 
-    # ------------------------------------------------- deciding a claim
+    # --------------------------------------------- judging a box's message
 
-    def judge(self, token: bytes, box: Box, now: int) -> ClaimResult:
-        """The verdict for a WIN, without changing anything (§3 conditions 1-5)."""
+    def _who(self, token: bytes, box: Box, now: int) -> Reply | Team:
+        """The team behind a token, or the reply that refuses it outright."""
         total = len(self.game.required)
         if not self.running_at(now):
-            return ClaimResult(Verdict.NOT_RUNNING, None, box.id, 0, total)
+            return Reply(Verdict.NOT_RUNNING, None, box.id, 0, total)
         tid = self.tokens.get(token)
         if tid is None:
-            return ClaimResult(Verdict.UNKNOWN_TEAM, None, box.id, 0, total)
-        team = self.teams[tid]
-        done = self.required_solved(team)
+            return Reply(Verdict.UNKNOWN_TEAM, None, box.id, 0, total)
+        return self.teams[tid]
+
+    def _reply(self, v: Verdict, team: Team, box: Box, **kw) -> Reply:
+        return Reply(v, team.id, box.id, self.required_solved(team), len(self.game.required), **kw)
+
+    def judge_start(self, token: bytes, box: Box, now: int) -> Reply:
+        team = self._who(token, box, now)
+        if isinstance(team, Reply):
+            return team
         if box.id in team.solved:
-            return ClaimResult(Verdict.ALREADY_SOLVED, tid, box.id, done, total)
+            return self._reply(Verdict.ALREADY_SOLVED, team, box)
         if not self.is_open_for(team, box):
-            return ClaimResult(Verdict.LOCKED, tid, box.id, done, total, self.first_missing(team, box))
-        done += 1 if box.required else 0
+            return self._reply(Verdict.LOCKED, team, box, needs=self.first_missing(team, box))
+        s = self.session_at(box.id, now)
+        if s is not None and s.team != team.id:
+            left = -(-(s.last + self.timeout_ms - now) // 1000)  # round up
+            return self._reply(Verdict.BUSY, team, box, arg=min(left, 0xFFFF))
+        return self._reply(Verdict.GO, team, box, arg=team.hints.get(box.id, 0))
+
+    def judge_win(self, token: bytes, box: Box, now: int) -> Reply:
+        """§3 conditions 1-6."""
+        team = self._who(token, box, now)
+        if isinstance(team, Reply):
+            return team
+        if box.id in team.solved:
+            return self._reply(Verdict.ALREADY_SOLVED, team, box)
+        if not self.is_open_for(team, box):
+            return self._reply(Verdict.LOCKED, team, box, needs=self.first_missing(team, box))
+        if not self._in_session(team, box, now):
+            return self._reply(Verdict.NO_SESSION, team, box)
         finishes = team.finished_at is None and all(
             b in team.solved or b == box.id for b in self.game.required
         )
-        return ClaimResult(Verdict.FINISHED if finishes else Verdict.ACCEPTED, tid, box.id, done, total)
+        done = self.required_solved(team) + (1 if box.required else 0)
+        return Reply(Verdict.FINISHED if finishes else Verdict.ACCEPTED, team.id, box.id, done,
+                     len(self.game.required))
+
+    def judge_hint(self, token: bytes, box: Box, n: int, now: int) -> Reply:
+        team = self._who(token, box, now)
+        if isinstance(team, Reply):
+            return team
+        if not self._in_session(team, box, now):
+            return self._reply(Verdict.NO_SESSION, team, box)
+        taken = team.hints.get(box.id, 0)
+        if n < 1 or n > len(box.hint_penalties_s) or n > taken + 1:
+            return self._reply(Verdict.NO_MORE_HINTS, team, box, arg=len(box.hint_penalties_s))
+        return self._reply(Verdict.HINT, team, box, arg=n)
+
+    def in_session(self, token: bytes, box: Box, now: int) -> str | None:
+        """For WRONG and END, which get no reply: the team, if it has the session."""
+        tid = self.tokens.get(token)
+        if tid is None or not self.running_at(now):
+            return None
+        return tid if self._in_session(self.teams[tid], box, now) else None
+
+    def _in_session(self, team: Team, box: Box, now: int) -> bool:
+        s = self.session_at(box.id, now)
+        return s is not None and s.team == team.id
 
     # ----------------------------------------------------------- events
 
     def apply(self, ev: dict) -> None:
         kind, at = ev["kind"], ev["at"]
+        self._expire(at)
         if kind == "team_entered":
             if self.state == "ended":
                 raise GameError("the run has ended")
@@ -270,10 +380,37 @@ class Run:
         elif kind == "run_ended":
             if self.state == "ended":
                 raise GameError("the run has already ended")
-            self.state, self.ended_at = "ended", at
+            self._end(at)
+        elif kind == "start":
+            if ev["verdict"] == Verdict.GO:
+                s = self.sessions.get(ev["box"])
+                if s is not None and s.team == ev["team"]:
+                    s.last = at
+                else:
+                    self.sessions[ev["box"]] = Session(ev["team"], at, at)
         elif kind == "claim":
             if Verdict(ev["verdict"]).accepted:
+                self._close(ev["box"], at)
                 self._solve(ev["team"], ev["box"], at)
+        elif kind == "hint":
+            if ev["verdict"] == Verdict.HINT:
+                team, box = self.teams[ev["team"]], self.game.boxes[ev["box"]]
+                n = ev["n"]
+                if n > team.hints.get(box.id, 0):
+                    team.hints[box.id] = n
+                    team.penalty_ms += box.hint_penalties_s[n - 1] * 1000
+                self._touch(ev["box"], at)
+        elif kind == "wrong":
+            if ev.get("team") and ev.get("counted"):
+                team, box = self.teams[ev["team"]], self.game.boxes[ev["box"]]
+                team.wrong[box.id] = team.wrong.get(box.id, 0) + 1
+                team.penalty_ms += box.wrong_penalty_s * 1000
+                self._touch(ev["box"], at)
+        elif kind == "end":
+            if ev.get("team") and self.sessions.get(ev["box"]) and self.sessions[ev["box"]].team == ev["team"]:
+                self._close(ev["box"], at)
+        elif kind == "session_closed":  # the operator
+            self._close(ev["box"], at)
         elif kind == "correction":
             team = self.teams[ev["team"]]
             if ev["action"] == "add":
@@ -281,14 +418,34 @@ class Run:
             else:
                 team.solved.pop(ev["box"], None)
                 self._update_finish(team)
-        elif kind == "attempt":
-            pass  # recorded for the history, no effect on state
         else:
             raise GameError(f"unknown event {kind}")
         if kind in ("claim", "correction") and self.state == "running" and self.teams and all(
             t.finished_at is not None for t in self.teams.values()
         ):
-            self.state, self.ended_at = "ended", at  # every team finished (§3)
+            self._end(at)  # every team finished (§3)
+
+    def _expire(self, now: int) -> None:
+        """Close sessions that timed out before `now`, charging the full timeout."""
+        for bid, s in list(self.sessions.items()):
+            if now >= s.last + self.timeout_ms:
+                self._close(bid, s.last + self.timeout_ms)
+
+    def _touch(self, box_id: str, at: int) -> None:
+        s = self.sessions.get(box_id)
+        if s is not None:
+            s.last = max(s.last, at)
+
+    def _close(self, box_id: str, at: int) -> None:
+        s = self.sessions.pop(box_id, None)
+        if s is not None:
+            team = self.teams[s.team]
+            team.box_time[box_id] = team.box_time.get(box_id, 0) + max(0, at - s.start)
+
+    def _end(self, at: int) -> None:
+        for bid in list(self.sessions):
+            self._close(bid, at)
+        self.state, self.ended_at = "ended", at
 
     def _solve(self, tid: str, bid: str, at: int) -> None:
         team = self.teams[tid]

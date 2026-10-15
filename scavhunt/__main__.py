@@ -84,6 +84,13 @@ def run_command(a) -> int:
     if a.cmd == "serve":
         return serve(game, store, scfg, raw.get("api", {}), a.db or raw.get("service", {}).get("db", "game.db"))
     if a.cmd == "control":
+        rid = store.current_run_id(game)
+        if a.command != "enable" and rid is not None:  # the box resets: its session ends
+            run = store.load(game, rid)
+            with store.change(run) as append:
+                if run.session_at(a.box, now):
+                    append({"kind": "session_closed", "at": now, "box": a.box,
+                            "reason": f"operator {a.command}"})
         topic, body = service.Service(game, store, scfg).control(
             a.box, {"reset": msg.CONTROL_RESET, "disable": msg.CONTROL_DISABLE,
                     "enable": msg.CONTROL_ENABLE}[a.command])
@@ -101,10 +108,13 @@ def run_command(a) -> int:
     run = store.load(game, rid)
     if a.cmd == "status":
         print(f"{game.title}, run {run.id}: {run.state}")
-        for s in run.standings():
-            fin = f"finished at +{(s['finished_at'] - run.started_at) / 1000:.0f}s" if s["finished_at"] else ""
-            print(f"{s['rank']:>3}. {s['name']:<24} {s['required_solved']}/{s['required_total']}  "
-                  f"{', '.join(s['solved'])}  {fin}")
+        for s in run.standings(run.ended_at or now):
+            fin = "finished" if s["finished_at"] else f"{s['required_solved']}/{s['required_total']}"
+            print(f"{s['rank']:>3}. {s['name']:<24} {s['points']:>5} pts  {_clock(s['time_ms'])}  "
+                  f"{fin:<9} hints {s['hints']}, wrong {s['wrong']}  {', '.join(s['solved'])}")
+        for bid, sess in run.sessions.items():
+            if run.session_at(bid, now):
+                print(f"     {bid}: {run.teams[sess.team].name} playing, {_clock(now - sess.start)}")
         return 0
     with store.change(run) as append:
         if a.cmd == "team":
@@ -126,6 +136,11 @@ def run_command(a) -> int:
     return 0
 
 
+def _clock(ms: int) -> str:
+    s = ms // 1000
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
+
+
 def service_config(raw: dict) -> service.ServiceConfig:
     known = {f for f in service.ServiceConfig.__dataclass_fields__}
     kw = {k: v for k, v in raw.items() if k in known}
@@ -137,10 +152,13 @@ def service_config(raw: dict) -> service.ServiceConfig:
 
 def check(game) -> int:
     print(f"{game.title} ({game.id}): {len(game.boxes)} boxes, {len(game.required)} required"
-          + (f", {game.time_limit_s // 60} min" if game.time_limit_s else ""))
+          + (f", {game.time_limit_s // 60} min" if game.time_limit_s else "")
+          + f", sessions time out after {game.session_timeout_s // 60} min")
     for b in game.boxes.values():
-        needs = f" after {', '.join(b.requires)}" if b.requires else " (open at the start)"
-        print(f"  {b.id:<12} 0x{b.net:02X}/0x{b.node:04X}{'' if b.required else ' optional'}{needs}")
+        needs = f"after {', '.join(b.requires)}" if b.requires else "open at the start"
+        hints = "/".join(str(p) for p in b.hint_penalties_s) + " s" if b.hint_penalties_s else "none"
+        print(f"  {b.id:<12} 0x{b.net:02X}/0x{b.node:04X} {b.points:>4} pts"
+              f"{'' if b.required else ' optional'}, {needs}; hints {hints}, wrong {b.wrong_penalty_s} s")
     return 0
 
 
