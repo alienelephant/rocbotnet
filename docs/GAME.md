@@ -23,7 +23,7 @@ Teams move around a space solving physical puzzles: *boxes* built from embedded 
 | **Team** | One or more players, entered in a run, who share progress and score. A single player is a team of one. |
 | **Token** | What a team taps or types on a box to say who they are: an NFC or RFID card, or a short code. A team can have several tokens (one card per player); each token belongs to exactly one team in a run. |
 | **Session** | A team's turn at a box: from the token tap that starts it until the team solves the box, gives up, or goes quiet for the session timeout. A box has at most one session at a time. |
-| **Box time** | The total length of a team's sessions at a box, whether or not it solved the box. |
+| **Box time** | The total length of a team's sessions at a box, whether or not it solved the box, measured by the server from when it received the box's messages. |
 | **Hint** | Help a box gives during a session. Hints at a box are numbered 1, 2, 3 …, and each costs a time penalty at least as large as the one before. |
 | **Wrong attempt** | A wrong answer the box reports during a session. Each one costs a time penalty. |
 | **Points** | What a box is worth when solved. Required and optional boxes both have points. |
@@ -54,7 +54,7 @@ Teams move around a space solving physical puzzles: *boxes* built from embedded 
 - a state, which is one of `open` (teams can be entered), `running` or `ended`;
 - a start time *t₀* and, while running, the deadline *t₀ + L* if *L* is set.
 
-All times are the hub's receive times.
+All times are the server's: the time the hub received each box message. Boxes have no clock in the game; a session's length is the difference between the receive times of its messages.
 
 **Progress:** for each team *t*, *S(t) ⊆ B* is the set of boxes it has solved, initially empty. *S(t)* only grows (except by operator correction).
 
@@ -100,7 +100,7 @@ An accepted claim adds *b* to *S(t)*, records a solve *(t, b, τ)*, and closes t
 
 The *winner* is the first team in the standings, if it has finished.
 
-Time is measured at the boxes, not on the wall clock, because every team plays every box: a team that waits for a busy box shouldn't lose to one that didn't have to.
+Time counts only while a team is in a session, not from the start of the run, because every team plays every box: a team that waits for a busy box shouldn't lose to one that didn't have to.
 
 ## 4. Rules
 
@@ -113,7 +113,7 @@ Time is measured at the boxes, not on the wall clock, because every team plays e
 7. **The clock runs while a team is at a box.** A session's time counts whether or not the team solves the box. A team that walks away without giving up is charged the full session timeout.
 8. **Hints and wrong answers cost time.** Each further hint at a box costs at least as much as the one before; repeating a hint already given is free.
 9. **Solving twice changes nothing.** A second `WIN` from the same team for the same box is answered `already solved`.
-10. **The hub's clock decides.** Times are the hub's receive times, never the box's. Messages after the deadline are refused.
+10. **The server's clock decides.** Every time in the game is when the hub received a box's message, never a time the box reports. Messages after the deadline are refused.
 11. **Tokens are per run.** The operator issues them when entering teams. A token that isn't in the run is refused as `unknown team`.
 12. **Operators can correct.** The operator can add or remove a solve, and close a session (resetting a box closes its session). Corrections are recorded as events of their own, so the history shows what was changed and when.
 
