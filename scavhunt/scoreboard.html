@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoreboard</title>
+<style>
+  :root { --bg: #111418; --fg: #e8e6e1; --dim: #8a8f98; --line: #2a2f36; --ok: #5cc28a; --open: #e0b44c; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+         font: 16px/1.4 system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  .meta { color: var(--dim); margin-bottom: 16px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--dim); font-weight: 500; font-size: .85rem; }
+  td.rank { width: 2.5em; color: var(--dim); }
+  .box { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 7px; border-radius: 10px;
+         border: 1px solid var(--line); color: var(--dim); font-size: .8rem; }
+  .box.solved { background: var(--ok); border-color: var(--ok); color: #0b1a12; }
+  .box.open { border-color: var(--open); color: var(--open); }
+  .done { color: var(--ok); font-weight: 600; }
+  .clock { font-variant-numeric: tabular-nums; font-size: 1.3rem; }
+</style>
+</head>
+<body>
+<h1 id="title">Scavenger hunt</h1>
+<div class="meta"><span id="state"></span> <span class="clock" id="clock"></span></div>
+<table>
+  <thead><tr><th>#</th><th>Team</th><th>Solved</th><th>Boxes</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+let view = null, rank = [];
+const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function render() {
+  if (!view) return;
+  document.getElementById("title").textContent = view.title;
+  const run = view.run;
+  document.getElementById("state").textContent = run ? `Run ${run.id}: ${run.state}` : "No run yet";
+  let clock = "";
+  if (run && run.started_at) {
+    const end = run.ended_at || Date.now();
+    clock = run.deadline && run.state === "running" ? `${fmt(run.deadline - Date.now())} left` : fmt(end - run.started_at);
+  }
+  document.getElementById("clock").textContent = clock;
+  const teams = Object.fromEntries((run ? run.teams : []).map(t => [t.team, t]));
+  document.getElementById("rows").innerHTML = rank.map(r => {
+    const t = teams[r.team] || {solved: {}, open: []};
+    const boxes = view.boxes.map(b => {
+      const cls = b.id in t.solved ? "solved" : t.open.includes(b.id) ? "open" : "";
+      return `<span class="box ${cls}">${esc(b.name)}${b.required ? "" : " ★"}</span>`;
+    }).join("");
+    const done = r.finished_at ? `<span class="done">finished ${fmt(r.finished_at - run.started_at)}</span>`
+                               : `${r.required_solved} / ${r.required_total}`;
+    return `<tr><td class="rank">${r.rank}</td><td>${esc(r.name)}</td><td>${done}</td><td>${boxes}</td></tr>`;
+  }).join("");
+}
+
+async function poll() {
+  try {
+    [view, rank] = await Promise.all([fetch("/api/run").then(r => r.json()),
+                                      fetch("/api/standings").then(r => r.json())]);
+  } catch (e) { /* keep showing the last view */ }
+  render();
+}
+poll(); setInterval(poll, 3000); setInterval(render, 1000);
+</script>
+</body>
+</html>
