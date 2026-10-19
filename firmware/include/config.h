@@ -49,6 +49,9 @@
 #define RC522_DEBUG 1
 #endif
 #define RC522_REPORT_MS 5000UL
+#ifndef RC522_SPI_HZ
+#define RC522_SPI_HZ 1000000UL  // 1 MHz: slow enough for breadboard wiring (the chip allows 10 MHz)
+#endif
 
 // --- pins: Heltec WiFi LoRa 32 V3 or V4 (docs/BREADBOARD.md). GPIO numbers;
 // the header pin is in each comment. Chosen from the GPIOs Heltec recommends

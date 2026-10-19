@@ -204,6 +204,15 @@ With `RC522_DEBUG` on (the default in `config.h`), the serial log shows what the
 [rc522] antenna ON (TxControlReg 0x83), receiver gain 0x70 (max 0x70)
 ```
 
+Then a register probe: the chip's command and status registers, a write test (two patterns written to a register and read back), and a `VERDICT` line:
+
+```
+[rc522] registers: Command 0x20 (PowerDown off, command 0x0), Status1 0x21, Status2 0x00, Error 0x00, RFCfg 0x70, TxControl 0x83
+[rc522] write test: wrote 0x5A, read back 0x5A: ok
+[rc522] write test: wrote 0xA5, read back 0xA5: ok
+[rc522] VERDICT: the chip is written to and its antenna is on.
+```
+
 **Every 5 seconds,** a summary of the polls since the last one, a fresh read of the version register (so a loose wire shows), and the link state:
 
 ```
@@ -221,7 +230,8 @@ With `RC522_DEBUG` on (the default in `config.h`), the serial log shows what the
 |---|---|---|
 | `version register 0x00` or `0xFF: NO ANSWER on SPI` | The chip isn't on the bus | Check each wire against §2.2 by header pin; MISO and MOSI swapped is the usual one; 3.3 V and GND |
 | The version changes between reports, `(CHANGED: loose wire?)` | A connection comes and goes | Reseat the jumpers; breadboard contacts wear |
-| `antenna OFF` | The RF field isn't on | Shouldn't happen after start; reset the board |
+| `antenna OFF`, with `write test … FAILED` | The chip answers reads but ignores writes. Usually it hasn't finished its reset because its oscillator isn't running: **no power on the module's 3.3V pin** (it runs weakly off the signal lines), no GND, or a dead crystal. The `VERDICT` line says which. | Measure the voltage between the module's 3.3V and GND pins with the board on: it should be 3.3 V. Reseat both wires, ideally straight to the board's J3-2 and J3-1. Then check MOSI and SCK. |
+| `antenna OFF`, write test ok | The antenna driver didn't turn on | Reset the board; if it persists, the module's antenna circuit is suspect |
 | `self-test: FAIL` with version `0x88`, `0x12` or `0xB2` | A clone chip | Normal; carry on with the other checks |
 | Polls but all `silent` while you hold a card on it | Nothing in the field answers | Hold the card flat on the antenna (the coil on the board, not the chip) for a second or two. Check it's a 13.56 MHz ISO 14443A card: 125 kHz fobs (EM4100, often grey teardrops marked "125K") never answer. Try a bank card or a phone with NFC as a known-good tag: either should at least produce `errors` or `card answers`. |
 | `errors` (e.g. `CRC error`, `A buffer is not big enough`) | Something answers but garbled | The card is at the edge of the field, or the module's antenna is weak: hold it closer and still |
@@ -229,7 +239,7 @@ With `RC522_DEBUG` on (the default in `config.h`), the serial log shows what the
 | `NOT POLLED` | The loop isn't reaching the reader | Shouldn't happen: report it with the log |
 | `link: joining Wi-Fi` or `waiting for HELLO ACK` | The reader still runs; cards show as "Offline" on the display, and aren't sent | Fix the link separately (§5) |
 
-To turn the detail off, `#define RC522_DEBUG 0` in `secrets.h`.
+To turn the detail off, `#define RC522_DEBUG 0` in `secrets.h`. The RC522's SPI clock is 1 MHz (`RC522_SPI_HZ`), slow enough for breadboard wires.
 
 ## 7. Troubleshooting
 

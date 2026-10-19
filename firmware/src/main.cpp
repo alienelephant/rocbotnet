@@ -22,7 +22,7 @@
 // --- hardware
 static SPIClass rfid_spi(HSPI);  // its own bus: the LoRa radio has the other one
 static MFRC522DriverPinSimple rfid_ss(PIN_RC522_SS);
-static MFRC522DriverSPI rfid_driver{rfid_ss, rfid_spi, SPISettings(4000000, MSBFIRST, SPI_MODE0)};
+static MFRC522DriverSPI rfid_driver{rfid_ss, rfid_spi, SPISettings(RC522_SPI_HZ, MSBFIRST, SPI_MODE0)};
 static MFRC522 rfid{rfid_driver};
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, PIN_OLED_RST, PIN_OLED_SCL, PIN_OLED_SDA);
 static bool reader_ok;
@@ -119,6 +119,45 @@ static const char *version_name(uint8_t v) {
     }
 }
 
+// Can the chip be written to, and has it finished its reset? Reads alone can
+// succeed when it can't: a chip whose oscillator isn't running (no power on
+// its 3.3V pin, no GND, a dead crystal) still answers fixed values like the
+// version register, but ignores writes, so the antenna never turns on.
+static void reader_probe() {
+    using R = MFRC522Constants::PCD_Register;
+    uint8_t cmd = reg(R::CommandReg), s1 = reg(R::Status1Reg), s2 = reg(R::Status2Reg);
+    uint8_t err = reg(R::ErrorReg), rf = reg(R::RFCfgReg), tx = reg(R::TxControlReg);
+    Serial.printf("[rc522] registers: Command 0x%02X (PowerDown %s, command 0x%X), Status1 0x%02X, "
+                  "Status2 0x%02X, Error 0x%02X, RFCfg 0x%02X, TxControl 0x%02X\n",
+                  cmd, (cmd & 0x10) ? "ON" : "off", cmd & 0x0F, s1, s2, err, rf, tx);
+
+    // Write two patterns to a plain read/write register and read them back.
+    const uint8_t keep = reg(R::TReloadRegL);
+    bool writes = true;
+    for (uint8_t pattern : {0x5A, 0xA5}) {
+        rfid_driver.PCD_WriteRegister(R::TReloadRegL, pattern);
+        uint8_t back = reg(R::TReloadRegL);
+        Serial.printf("[rc522] write test: wrote 0x%02X, read back 0x%02X: %s\n", pattern, back,
+                      back == pattern ? "ok" : "FAILED");
+        writes = writes && back == pattern;
+    }
+    rfid_driver.PCD_WriteRegister(R::TReloadRegL, keep);
+
+    if (!writes && ((cmd & 0x10) || (cmd & 0x0F) == 0x0F)) {
+        Serial.println("[rc522] VERDICT: the chip is stuck in reset (its oscillator isn't running), so it "
+                       "ignores writes and the antenna stays off. Check, with the power on: 3.3 V at the "
+                       "module's 3.3V pin (measure it), its GND, then the 27.12 MHz crystal on the module.");
+    } else if (!writes) {
+        Serial.println("[rc522] VERDICT: reads work but writes don't reach the chip. Check the MOSI and SCK "
+                       "wires (J3-17, J3-16), and the module's 3.3 V and GND: a module powered only through "
+                       "its signal lines behaves like this.");
+    } else if ((tx & 0x03) != 0x03) {
+        Serial.println("[rc522] VERDICT: writes work but the antenna driver is off. Turning it on again.");
+    } else {
+        Serial.println("[rc522] VERDICT: the chip is written to and its antenna is on.");
+    }
+}
+
 static void reader_begin() {
     Serial.printf("[rc522] pins: SDA/SS GPIO%d, SCK GPIO%d, MOSI GPIO%d, MISO GPIO%d, RST GPIO%d\n",
                   PIN_RC522_SS, PIN_RC522_SCK, PIN_RC522_MOSI, PIN_RC522_MISO, PIN_RC522_RST);
@@ -138,6 +177,8 @@ static void reader_begin() {
         return;
     }
 #if RC522_DEBUG
+    Serial.printf("[rc522] SPI clock %lu Hz\n", (unsigned long)RC522_SPI_HZ);
+    reader_probe();
     // The chip's own self-test (it resets the chip, so initialise again after).
     // Genuine NXP chips pass; many clones fail it and still read cards fine.
     bool self_test = rfid.PCD_PerformSelfTest();
