@@ -1,4 +1,4 @@
-# Breadboard: Heltec V3 + RC522 on Wi-Fi
+# Breadboard: Heltec V3 or V4 + RC522 on Wi-Fi
 
 The first hardware test of rfidprox: the proxy on a breadboard, with no backend. It joins the rfgateway's `roclink-nodes` Wi-Fi as roclink node `42/0301`, says `HELLO`, checks the link with `PING`s, and sends an `AUTH_REQ` for every card tapped. The gateway ACKs and publishes each one; you watch them arrive with `tcpdump` and `tools/watch.py` on the Pi.
 
@@ -8,7 +8,7 @@ There's no `rfidauth` yet, so no `GRANT` comes back: after 10 s the display says
 
 | Part | Notes |
 |---|---|
-| Heltec WiFi LoRa 32 V3 | with its antenna on (the LoRa radio isn't used yet, but never run it without one) |
+| Heltec WiFi LoRa 32 **V4** or **V3** | with its LoRa antenna on (the radio isn't used yet, but never power a LoRa board without one) |
 | RC522 module | the common blue board, 13.56 MHz |
 | ISO 14443A cards or fobs | MIFARE Classic 1K, Ultralight or NTAG. 125 kHz fobs don't work. |
 | Buzzer (optional) | active, or a small passive piezo |
@@ -16,71 +16,94 @@ There's no `rfidauth` yet, so no `GRANT` comes back: after 10 s the display says
 
 ## 2. Wiring
 
-Every signal is 3.3 V. **Power the RC522 from 3V3, never 5 V.**
+### 2.1 The headers
 
-| RC522 pin | Heltec V3 pin | GPIO | `config.h` |
+Both boards have two 18-pin headers, **J2** and **J3**, numbered 1–18 from the USB-C end. The V4 is pin-compatible with the V3: the same signal is on the same header pin. The table below is from Heltec's WiFi LoRa 32 V4 datasheet (V4.3.1, tables 2.2.1 and 2.2.2). **Header pin numbers and GPIO numbers are different things**: GPIO 3, for example, is on J3 pin 14. The firmware uses GPIO numbers; you wire by header pin.
+
+| Pin | J2 | J3 |
+|---|---|---|
+| 1 | GND | GND |
+| 2 | 5V | 3V3 |
+| 3 | Ve (switched 3.3 V) | 3V3 |
+| 4 | Ve (switched 3.3 V) | GPIO37: battery-reading control |
+| 5 | GPIO44 (U0RXD) | GPIO46 (V4: LoRa amplifier) |
+| 6 | GPIO43 (U0TXD) | GPIO45 |
+| 7 | RST (reset button) | GPIO42 (V4: GNSS reset) |
+| 8 | GPIO0 (PRG button) | GPIO41 (V4: GNSS PPS) |
+| 9 | GPIO36: Vext control | GPIO40 (V4: GNSS wake-up) |
+| 10 | GPIO35: LED | GPIO39 (V4: GNSS TX) |
+| 11 | GPIO34 | GPIO38 (V4: GNSS RX) |
+| 12 | GPIO33 | GPIO1: battery voltage |
+| 13 | **GPIO47 → RC522 SDA** | GPIO2 (V4: LoRa amplifier enable) |
+| 14 | **GPIO48 → RC522 RST** | **GPIO3 → buzzer** |
+| 15 | GPIO26 | **GPIO4 → RC522 MISO** |
+| 16 | GPIO21: OLED reset | **GPIO5 → RC522 SCK** |
+| 17 | GPIO20 (V4: USB D+) | **GPIO6 → RC522 MOSI** |
+| 18 | GPIO19 (V4: USB D−) | GPIO7 (V4: LoRa amplifier supply) |
+
+On the V3, GPIO 43/44 carry the USB serial (its CP2102), and GPIO 2, 7, 38–42 and 46 aren't used by the board. Check the silkscreen beside the headers on your board before wiring: it prints the GPIO number at each pin.
+
+### 2.2 The RC522
+
+Every signal is 3.3 V. **Power the RC522 from 3V3 (J3-2 or J3-3), never from 5V.**
+
+| RC522 pin | Header pin | GPIO | `config.h` |
 |---|---|---|---|
-| 3.3V | 3V3 | | |
-| GND | GND | | |
-| SDA (chip select) | 4 | 4 | `PIN_RC522_SS` |
-| SCK | 5 | 5 | `PIN_RC522_SCK` |
-| MOSI | 6 | 6 | `PIN_RC522_MOSI` |
-| MISO | 7 | 7 | `PIN_RC522_MISO` |
-| RST | 3 | 3 | `PIN_RC522_RST` |
+| 3.3V | J3-2 (3V3) | | |
+| GND | J3-1 (GND) | | |
+| SDA (chip select) | J2-13 | 47 | `PIN_RC522_SS` |
+| RST | J2-14 | 48 | `PIN_RC522_RST` |
+| MISO | J3-15 | 4 | `PIN_RC522_MISO` |
+| SCK | J3-16 | 5 | `PIN_RC522_SCK` |
+| MOSI | J3-17 | 6 | `PIN_RC522_MOSI` |
 | IRQ | not connected | | |
 
-| Other | Heltec V3 pin | GPIO | Notes |
+| Other | Header pin | GPIO | Notes |
 |---|---|---|---|
-| Buzzer + | 2 | 2 | optional; − to GND. A passive piezo can go straight on the pin for bench use. |
-| OLED | on board | 17, 18, 21; Vext 36 | the firmware switches Vext on |
+| Buzzer + | J3-14 | 3 | optional; − to GND (J2-1). A small passive piezo can go straight on the pin for bench use. |
+| OLED | on board | 17, 18; reset 21 | powered through Vext, which the firmware switches on |
 | LED | on board | 35 | flashes on each transmission |
 
 ```
-   RC522                     Heltec WiFi LoRa 32 V3
+   RC522                        Heltec WiFi LoRa 32 V4 / V3
   ┌────────┐
-  │ 3.3V   ├──────────────── 3V3
-  │ RST    ├──────────────── GPIO 3
-  │ GND    ├──────────────── GND
-  │ IRQ    │  (n/c)
-  │ MISO   ├──────────────── GPIO 7
-  │ MOSI   ├──────────────── GPIO 6
-  │ SCK    ├──────────────── GPIO 5
-  │ SDA    ├──────────────── GPIO 4
-  └────────┘                 GPIO 2 ──── buzzer + (optional)
+  │ 3.3V   ├──────────────────── J3-2  3V3
+  │ RST    ├──────────────────── J2-14 GPIO48
+  │ GND    ├──────────────────── J3-1  GND
+  │ IRQ    │  (not connected)
+  │ MISO   ├──────────────────── J3-15 GPIO4
+  │ MOSI   ├──────────────────── J3-17 GPIO6
+  │ SCK    ├──────────────────── J3-16 GPIO5
+  │ SDA    ├──────────────────── J2-13 GPIO47
+  └────────┘
+                buzzer + ─────── J3-14 GPIO3     buzzer − ── J2-1 GND
 ```
 
-The pin labels are printed beside the V3's headers. GPIO 1–7 are on one header row; check the silkscreen on your board's revision before wiring.
+### 2.3 Why these pins
 
-**Why these pins.** The RC522 has its own SPI bus (the ESP32-S3's second SPI controller), because the LoRa radio uses the first one on GPIO 8–14. GPIO 3 is a strapping pin, but only for JTAG selection, so it's safe as an output. The box UART (GPIO 47/48, HARDWARE.md §2.2) isn't used yet.
-
-### The full pin map
-
-| GPIO | Use | Where |
-|---|---|---|
-| 0 | PRG button | on board |
-| 1 | battery voltage | on board |
-| 2 | buzzer | breadboard |
-| 3 | RC522 RST | breadboard |
-| 4 | RC522 SDA (chip select) | breadboard |
-| 5 | RC522 SCK | breadboard |
-| 6 | RC522 MOSI | breadboard |
-| 7 | RC522 MISO | breadboard |
-| 8–14 | SX1262 LoRa radio (NSS, SCK, MOSI, MISO, RST, BUSY, DIO1) | on board |
-| 17, 18, 21 | OLED SDA, SCL, RST | on board |
-| 35 | LED | on board |
-| 36 | Vext (low = OLED and Vext pin powered) | on board |
-| 43, 44 | USB serial (CP2102) | on board |
-| 47, 48 | box UART TX, RX (later) | reserved |
+- They are among the GPIOs Heltec recommends for add-ons (1, 2, 4–7, 19, 20, 47, 48), minus those either board uses: on the **V4**, GPIO 2 and 7 control the LoRa radio's power amplifier, 19 and 20 are its USB port, and 1 reads the battery.
+- GPIO 38–42 are free on a V4 only while nothing is plugged into its GNSS connector, and 33–37 belong to the flash and PSRAM: none of them are used.
+- The RC522 has its own SPI bus (the ESP32-S3's second SPI controller); the LoRa radio uses the first, on GPIO 8–14, inside the board.
+- GPIO 3 is a strapping pin (JTAG source selection), which a buzzer can't disturb, so it gets the buzzer, not a signal the reader depends on.
+- The box UART, for later, will need two more: GPIO 39 and 40 (J3-10, J3-9) are the likely pair, as long as no GNSS module is fitted to a V4.
 
 ## 3. Build and flash
 
-The firmware is in `firmware/` (PlatformIO). It needs `roclink-rfc` next to this repository.
+The firmware is in `firmware/` (PlatformIO). It needs `roclink-rfc` next to this repository. Pick the environment for your board:
 
 ```bash
 cd ~/Documents/code/ai_slop/rfidprox/firmware
-~/.platformio/penv/bin/pio run -e heltec_v3 -t upload
-~/.platformio/penv/bin/pio device monitor -e heltec_v3
+~/.platformio/penv/bin/pio run -e heltec_v4 -t upload      # or heltec_v3
+~/.platformio/penv/bin/pio device monitor -e heltec_v4
 ```
+
+| | `heltec_v4` | `heltec_v3` |
+|---|---|---|
+| Serial monitor over | the native USB port | the CP2102 |
+| Vext (OLED power) on | GPIO36 high | GPIO36 low |
+| Flash, PSRAM | 16 MB, 2 MB | 8 MB, none |
+
+If a V4 doesn't show up for uploading, hold PRG, press RST, release PRG (boot mode), then upload again.
 
 Defaults, in `firmware/include/config.h`:
 
@@ -172,7 +195,9 @@ journalctl -u roclink-gw -f        # on the Pi
 
 | Symptom | Check |
 |---|---|
-| `RC522 not found` on the display | Wiring, especially MISO/MOSI swapped, and 3.3 V. The serial log shows the version register value. |
+| `RC522 not found` on the display | Wiring by header pin (§2.1), especially MISO/MOSI swapped, and 3.3 V. The serial log shows the version register value. |
+| Blank display on a V4 | Vext's polarity: the firmware drives GPIO36 high on a V4 (from the datasheet) and low on a V3. Check you flashed the right environment. |
+| No serial output on a V4 | Its serial is the native USB port: use `-e heltec_v4`, whose build turns USB CDC on. |
 | Card taps do nothing | Hold the card flat against the antenna for a moment. A tap counts once until the card leaves the field. 125 kHz fobs aren't read at all. |
 | `Wi-Fi: joining` forever | `roclink-nodes` reachable? `sudo hostapd_cli -i wlan0 all_sta` on the Pi lists connected stations. |
 | `No gateway` | `roclink-gw` running on the Pi; `tcpdump` shows whether frames arrive. |

@@ -1,4 +1,4 @@
-// rfidprox, breadboard firmware (docs/BREADBOARD.md).
+// rfidprox, breadboard firmware for a Heltec WiFi LoRa 32 V3 or V4 (docs/BREADBOARD.md).
 //
 // Joins the rfgateway's Wi-Fi as roclink node 0x0301, says HELLO, keeps the
 // link checked with PINGs, and sends an AUTH_REQ for every card tapped on the
@@ -170,7 +170,7 @@ void setup() {
     Serial.printf("\n[rfidprox] firmware %04X, node %02X/%04X\n", FW_VERSION, ROCLINK_NET, ROCLINK_NODE);
 
     pinMode(PIN_VEXT, OUTPUT);
-    digitalWrite(PIN_VEXT, LOW);  // power the OLED
+    digitalWrite(PIN_VEXT, VEXT_ON);  // power the OLED
     delay(50);
     oled.begin();
     pinMode(PIN_BUZZER, OUTPUT);

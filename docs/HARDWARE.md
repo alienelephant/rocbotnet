@@ -19,12 +19,12 @@ That's 12–13 GPIOs even with the two SPI devices on one bus. The XIAO ESP32-S3
 
 | Board | Radio | Free GPIOs | For | Against |
 |---|---|---|---|---|
-| **Heltec WiFi LoRa 32 V3** (chosen) | SX1262 on board | about 15 | Radio and OLED already wired; same family as the V2 boards in use | Larger |
+| **Heltec WiFi LoRa 32 V3 or V4** (chosen; the V4 is pin-compatible) | SX1262 on board | about 10 safe ones | Radio and OLED already wired; same family as the V2 boards in use | Larger |
 | XIAO ESP32-S3 + Wio-SX1262 kit | SX1262 on the board-to-board connector | D0–D7 after the radio | Tiny | No spare pins; no display |
 | ESP32-S3-DevKitC-1 + SX1262 breakout | separate module | 30+ | Most pins, easy to probe | Loose wiring: a bench board only |
 | A HaLow board (ESP32-S3 + Morse Micro MM6108) | Wi-Fi HaLow | depends | For the HaLow transport later | Check availability; needs a HaLow access point |
 
-## 2. Heltec WiFi LoRa 32 V3
+## 2. Heltec WiFi LoRa 32 V3 and V4
 
 ### 2.1 Fixed on the board
 
@@ -35,37 +35,30 @@ From the board's documentation and community pin maps (not changeable):
 | SX1262 NSS / SCK / MOSI / MISO | 8 / 9 / 10 / 11 |
 | SX1262 RST / BUSY / DIO1 | 12 / 13 / 14 |
 | OLED SDA / SCL / RST | 17 / 18 / 21 |
-| Vext power switch (low = on: powers the OLED and the header's Vext pin) | 36 |
+| Vext power switch (powers the OLED and the Ve pins; V3: low = on, V4: high = on) | 36 |
 | White LED | 35 |
 | PRG button | 0 |
 | Battery voltage (ADC) | 1 |
-| USB serial (CP2102) | 43 / 44 |
+| USB serial | V3: a CP2102 on 43 / 44; V4: native USB on 19 / 20 |
+| V4 only: LoRa power amplifier (FEM) | 2, 7, 46 |
+| V4 only: GNSS connector | 34 (power), 38–42 |
 
-### 2.2 Proposed wiring
+### 2.2 Wiring
 
-The RC522 gets its own SPI bus (the ESP32-S3's second general-purpose SPI controller), so it doesn't share the radio's bus or timing.
+The pin assignments, with header pins and the full J2/J3 tables, are in [BREADBOARD.md](BREADBOARD.md) §2. In short:
 
-| Part | Signal | GPIO | Notes |
-|---|---|---|---|
-| RC522 | SCK | 5 | second SPI bus |
-| | MOSI | 6 | |
-| | MISO | 7 | |
-| | SDA (chip select) | 4 | |
-| | RST | 3 | |
-| | 3.3 V, GND | 3V3, GND | the RC522 is a 3.3 V part: never 5 V |
-| Box UART (UART1) | proxy TX → box RX | 47 | |
-| | box TX → proxy RX | 48 | |
-| Buzzer | | 2 | passive piezo via a small transistor, or an active buzzer |
-| Status | | 35 | on-board LED |
-| OLED | | 17 / 18 / 21, Vext 36 | on board |
+| Part | GPIO | Header pin |
+|---|---|---|
+| RC522 SDA, RST | 47, 48 | J2-13, J2-14 |
+| RC522 MISO, SCK, MOSI | 4, 5, 6 | J3-15, J3-16, J3-17 |
+| Buzzer | 3 | J3-14 |
+| Box UART TX, RX (later) | 39, 40 | J3-10, J3-9 |
 
-Avoid the strapping pins (0, 3, 45, 46) for anything that could hold a level at reset. GPIO3 is a strapping pin, but only for JTAG source selection, so it's safe as the RC522's reset. GPIO 33–37 are tied to the flash and PSRAM on some ESP32-S3 variants.
+These work on both the **V3** and the **V4**, which is pin-compatible with it. On the V4, GPIO 2 and 7 control the LoRa power amplifier and 38–42 the GNSS connector, so they're avoided; the box UART on 39/40 assumes no GNSS module is fitted.
 
-### 2.3 To verify before wiring
+### 2.3 Still to check
 
-- That GPIO 47 and 48 are on the V3's header. If not, use 41 / 42 for the box UART.
-- That GPIO 2–7 are free on the header with the OLED in use.
-- The SX1262's TCXO voltage (1.8 V on the V3) and DIO2 RF-switch setting, for RadioLib.
+- The SX1262's TCXO voltage and DIO2 RF-switch setting for RadioLib, and on a V4 its front-end pins (GPIO 2, 7, 46), when LoRa is added.
 
 ## 3. Power
 

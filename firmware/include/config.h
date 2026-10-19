@@ -43,17 +43,25 @@
 #define SAME_CARD_MS 2000                  // a card held on the reader counts once
 #define EPOCH_MS (24UL * 60UL * 60UL * 1000UL)  // roclink key ratchet: daily
 
-// --- pins: Heltec WiFi LoRa 32 V3 (docs/BREADBOARD.md)
-#define PIN_RC522_SCK 5
-#define PIN_RC522_MOSI 6
-#define PIN_RC522_MISO 7
-#define PIN_RC522_SS 4
-#define PIN_RC522_RST 3
-#define PIN_BUZZER 2
-#define PIN_LED 35        // on board
-#define PIN_VEXT 36       // on board: LOW powers the OLED
-#define PIN_OLED_SDA 17   // on board
-#define PIN_OLED_SCL 18   // on board
-#define PIN_OLED_RST 21   // on board
+// --- pins: Heltec WiFi LoRa 32 V3 or V4 (docs/BREADBOARD.md). GPIO numbers;
+// the header pin is in each comment. Chosen from the GPIOs Heltec recommends
+// for add-ons that neither board uses: on the V4, GPIO 2 and 7 drive the LoRa
+// front end and 38-42 the GNSS connector.
+#define PIN_RC522_SS 47    // J2-13
+#define PIN_RC522_RST 48   // J2-14
+#define PIN_RC522_MISO 4   // J3-15
+#define PIN_RC522_SCK 5    // J3-16
+#define PIN_RC522_MOSI 6   // J3-17
+#define PIN_BUZZER 3       // J3-14 (optional)
+#define PIN_LED 35         // on board (J2-10)
+#define PIN_VEXT 36        // on board (J2-9): powers the OLED and the Ve pins
+#if defined(RFIDPROX_BOARD_V4)
+#define VEXT_ON HIGH       // V4 datasheet 3.3: VextCtrl high
+#else
+#define VEXT_ON LOW        // V3: low
+#endif
+#define PIN_OLED_SDA 17    // on board
+#define PIN_OLED_SCL 18    // on board
+#define PIN_OLED_RST 21    // on board (J2-16)
 
 #define FW_VERSION 0x0001
