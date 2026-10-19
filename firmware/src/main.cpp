@@ -98,7 +98,30 @@ static void on_downlink(uint8_t schema, const uint8_t *p, size_t len) {
 
 // -------------------------------------------------------------------- reader
 
+#include <MFRC522Debug.h>
+
+// RC522 diagnostics (RC522_DEBUG in config.h): what the reader sees on every
+// poll, not just successful reads, summarised every RC522_REPORT_MS.
+static uint32_t dbg_polls, dbg_silent, dbg_answers, dbg_other, dbg_select_fail, dbg_last_report;
+static uint8_t dbg_last_version;
+
+static uint8_t reg(MFRC522Constants::PCD_Register r) { return rfid_driver.PCD_ReadRegister(r); }
+
+static const char *version_name(uint8_t v) {
+    switch (v) {
+        case 0x91: return "MFRC522 v1.0";
+        case 0x92: return "MFRC522 v2.0";
+        case 0x88: return "FM17522 clone";
+        case 0x12: return "counterfeit chip";
+        case 0xB2: return "FM17522 clone";
+        case 0x00: case 0xFF: return "NO ANSWER on SPI";
+        default: return "unknown chip";
+    }
+}
+
 static void reader_begin() {
+    Serial.printf("[rc522] pins: SDA/SS GPIO%d, SCK GPIO%d, MOSI GPIO%d, MISO GPIO%d, RST GPIO%d\n",
+                  PIN_RC522_SS, PIN_RC522_SCK, PIN_RC522_MOSI, PIN_RC522_MISO, PIN_RC522_RST);
     pinMode(PIN_RC522_RST, OUTPUT);  // hardware reset: low, then high
     digitalWrite(PIN_RC522_RST, LOW);
     delay(10);
@@ -106,26 +129,97 @@ static void reader_begin() {
     delay(50);
     rfid_spi.begin(PIN_RC522_SCK, PIN_RC522_MISO, PIN_RC522_MOSI, PIN_RC522_SS);
     rfid.PCD_Init();
-    uint8_t v = rfid_driver.PCD_ReadRegister(MFRC522Constants::VersionReg);
-    // 0x91/0x92: genuine MFRC522; 0x88, 0x12, 0xB2: common clones. 0x00 or 0xFF: wiring.
+    uint8_t v = reg(MFRC522Constants::VersionReg);
+    dbg_last_version = v;
     reader_ok = v != 0x00 && v != 0xFF;
-    Serial.printf("[rc522] version register 0x%02X: %s\n", v,
-                  reader_ok ? "found" : "NOT FOUND: check wiring and 3.3 V (docs/BREADBOARD.md)");
+    Serial.printf("[rc522] version register 0x%02X: %s\n", v, version_name(v));
+    if (!reader_ok) {
+        Serial.println("[rc522] NOT FOUND: check the wiring by header pin, and 3.3 V (docs/BREADBOARD.md)");
+        return;
+    }
+#if RC522_DEBUG
+    // The chip's own self-test (it resets the chip, so initialise again after).
+    // Genuine NXP chips pass; many clones fail it and still read cards fine.
+    bool self_test = rfid.PCD_PerformSelfTest();
+    Serial.printf("[rc522] self-test: %s\n",
+                  self_test ? "PASS" : "FAIL (normal for many clones; not conclusive on its own)");
+    rfid.PCD_Init();
+#endif
+    rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);  // 48 dB: the best range
+    rfid.PCD_AntennaOn();
+    uint8_t tx = reg(MFRC522Constants::TxControlReg);
+    Serial.printf("[rc522] antenna %s (TxControlReg 0x%02X), receiver gain 0x%02X (max 0x70)\n",
+                  (tx & 0x03) == 0x03 ? "ON" : "OFF", tx, rfid.PCD_GetAntennaGain());
 }
 
-// A card in the field: its UID, ATQA and SAK. Each tap counts once.
+// One poll: asks any card in the field to answer (REQA). Returns true with a
+// card's UID, ATQA and SAK. Each tap counts once: a read card is halted until
+// it leaves the field.
 static bool read_card(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa, uint8_t *sak) {
     byte buf[2];
     byte size = sizeof(buf);
+    dbg_polls++;
     auto st = rfid.PICC_RequestA(buf, &size);
-    if (st != MFRC522Constants::STATUS_OK && st != MFRC522Constants::STATUS_COLLISION) return false;
-    if (!rfid.PICC_ReadCardSerial()) return false;
+    if (st == MFRC522Constants::STATUS_TIMEOUT) {  // nothing answered: no card in the field
+        dbg_silent++;
+        return false;
+    }
+    if (st != MFRC522Constants::STATUS_OK && st != MFRC522Constants::STATUS_COLLISION) {
+        // Something answered, but garbled: a card at the edge of the field, a weak
+        // antenna, or noise. Worth seeing every time.
+        dbg_other++;
+#if RC522_DEBUG
+        Serial.printf("[rc522] REQA answered with an error: %s\n",
+                      (const char *)MFRC522Debug::GetStatusCodeName(st));
+#endif
+        return false;
+    }
+    dbg_answers++;
     *atqa = (uint16_t)(buf[0] | buf[1] << 8);
+#if RC522_DEBUG
+    Serial.printf("[rc522] a card answered REQA: ATQA %04X%s; reading its UID\n", *atqa,
+                  st == MFRC522Constants::STATUS_COLLISION ? " (several cards: collision)" : "");
+#endif
+    auto sel = rfid.PICC_Select(&rfid.uid, 0);
+    if (sel != MFRC522Constants::STATUS_OK) {
+        dbg_select_fail++;
+#if RC522_DEBUG
+        Serial.printf("[rc522] UID read (anticollision/select) failed: %s. Hold the card still and flat.\n",
+                      (const char *)MFRC522Debug::GetStatusCodeName(sel));
+#endif
+        return false;
+    }
     *sak = rfid.uid.sak;
     *uid_len = rfid.uid.size;
     memcpy(uid, rfid.uid.uidByte, rfid.uid.size);
-    rfid.PICC_HaltA();  // it stays quiet until it leaves the field and comes back
+    rfid.PICC_HaltA();
     return true;
+}
+
+// Every RC522_REPORT_MS: what the reader saw, and whether it still answers on SPI.
+static void reader_report() {
+#if RC522_DEBUG
+    if (millis() - dbg_last_report < RC522_REPORT_MS) return;
+    dbg_last_report = millis();
+    uint8_t v = reg(MFRC522Constants::VersionReg);
+    uint8_t tx = reg(MFRC522Constants::TxControlReg);
+    Serial.printf("[rc522] last %lus: %lu polls, %lu silent, %lu card answers, %lu UID failures, "
+                  "%lu errors | version 0x%02X%s, antenna %s | link: %s\n",
+                  (unsigned long)(RC522_REPORT_MS / 1000), (unsigned long)dbg_polls,
+                  (unsigned long)dbg_silent, (unsigned long)dbg_answers,
+                  (unsigned long)dbg_select_fail, (unsigned long)dbg_other, v,
+                  v != dbg_last_version ? " (CHANGED: loose wire?)" : "",
+                  (tx & 0x03) == 0x03 ? "on" : "OFF",
+                  state == State::joining ? "joining Wi-Fi" : state == State::hello ? "waiting for HELLO ACK"
+                  : state == State::idle ? "ready" : "waiting for GRANT");
+    if (!reader_ok && v != 0x00 && v != 0xFF) {
+        Serial.println("[rc522] the reader answers now: initialising it again");
+        reader_begin();
+    }
+    if (reader_ok && dbg_polls == 0) Serial.println("[rc522] NOT POLLED: the loop isn't reaching the reader");
+    dbg_last_version = v;
+    dbg_polls = dbg_silent = dbg_answers = dbg_other = dbg_select_fail = 0;
+#endif
 }
 
 static void on_card() {
@@ -181,6 +275,7 @@ void setup() {
 }
 
 void loop() {
+    static uint32_t hello_retry_ms;
     rlink::loop();
 
     switch (state) {
@@ -188,6 +283,7 @@ void loop() {
             if (rlink::wifi_up()) state = State::hello;
             break;
         case State::hello: {
+            if (hello_retry_ms && millis() - hello_retry_ms < 3000) break;  // don't block the reader
             uint8_t p[24];
             size_t n = msg::hello(p, FW_VERSION, msg::RADIO_WIFI_UDP, "");
             if (rlink::send(msg::HELLO, p, n, true)) {
@@ -195,9 +291,11 @@ void loop() {
                 show("Tap a card", "");
                 state = State::idle;
                 last_ping_ms = millis();
+                hello_retry_ms = 0;
             } else {
+                Serial.println("[rfidprox] HELLO not ACKed: is roclink-gw reachable at the gateway address?");
                 show("No gateway", "retrying");
-                delay(3000);
+                hello_retry_ms = millis();
             }
             break;
         }
@@ -219,8 +317,11 @@ void loop() {
                 bool ok = rlink::ping();
                 Serial.printf("[link] PING: %s\n", ok ? "ACKed" : "no ACK");
             }
-            if (reader_ok) on_card();
             break;
     }
+    // The reader runs whatever the link is doing: a card tapped while offline is
+    // still read and shown (on_card() says "Offline"), just not sent.
+    if (reader_ok) on_card();
+    reader_report();
     draw();
 }

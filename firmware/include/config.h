@@ -43,6 +43,13 @@
 #define SAME_CARD_MS 2000                  // a card held on the reader counts once
 #define EPOCH_MS (24UL * 60UL * 60UL * 1000UL)  // roclink key ratchet: daily
 
+// --- RC522 diagnostics on the serial log: the self-test at start, every
+// non-empty poll result, and a summary every RC522_REPORT_MS (docs/BREADBOARD.md 6).
+#ifndef RC522_DEBUG
+#define RC522_DEBUG 1
+#endif
+#define RC522_REPORT_MS 5000UL
+
 // --- pins: Heltec WiFi LoRa 32 V3 or V4 (docs/BREADBOARD.md). GPIO numbers;
 // the header pin is in each comment. Chosen from the GPIOs Heltec recommends
 // for add-ons that neither board uses: on the V4, GPIO 2 and 7 drive the LoRa

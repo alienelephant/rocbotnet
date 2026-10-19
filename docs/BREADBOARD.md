@@ -191,7 +191,47 @@ journalctl -u roclink-gw -f        # on the Pi
 [info] up 42/0301 seq 6 schema 2 [enc] 13 bytes via udp
 ```
 
-## 6. Troubleshooting
+## 6. Reader diagnostics
+
+With `RC522_DEBUG` on (the default in `config.h`), the serial log shows what the reader does, not just the cards it reads.
+
+**At start:**
+
+```
+[rc522] pins: SDA/SS GPIO47, SCK GPIO5, MOSI GPIO6, MISO GPIO4, RST GPIO48
+[rc522] version register 0x92: MFRC522 v2.0
+[rc522] self-test: PASS
+[rc522] antenna ON (TxControlReg 0x83), receiver gain 0x70 (max 0x70)
+```
+
+**Every 5 seconds,** a summary of the polls since the last one, a fresh read of the version register (so a loose wire shows), and the link state:
+
+```
+[rc522] last 5s: 1650 polls, 1650 silent, 0 card answers, 0 UID failures, 0 errors | version 0x92, antenna on | link: ready
+```
+
+**Whenever something answers:**
+
+```
+[rc522] a card answered REQA: ATQA 0004; reading its UID
+[rc522] card 0A1B2C3D (ATQA 0004, SAK 08)
+```
+
+| What you see | Means | Do |
+|---|---|---|
+| `version register 0x00` or `0xFF: NO ANSWER on SPI` | The chip isn't on the bus | Check each wire against §2.2 by header pin; MISO and MOSI swapped is the usual one; 3.3 V and GND |
+| The version changes between reports, `(CHANGED: loose wire?)` | A connection comes and goes | Reseat the jumpers; breadboard contacts wear |
+| `antenna OFF` | The RF field isn't on | Shouldn't happen after start; reset the board |
+| `self-test: FAIL` with version `0x88`, `0x12` or `0xB2` | A clone chip | Normal; carry on with the other checks |
+| Polls but all `silent` while you hold a card on it | Nothing in the field answers | Hold the card flat on the antenna (the coil on the board, not the chip) for a second or two. Check it's a 13.56 MHz ISO 14443A card: 125 kHz fobs (EM4100, often grey teardrops marked "125K") never answer. Try a bank card or a phone with NFC as a known-good tag: either should at least produce `errors` or `card answers`. |
+| `errors` (e.g. `CRC error`, `A buffer is not big enough`) | Something answers but garbled | The card is at the edge of the field, or the module's antenna is weak: hold it closer and still |
+| `card answers` but `UID failures` | A card answered, but its UID read failed | Hold it still and flat; one card at a time |
+| `NOT POLLED` | The loop isn't reaching the reader | Shouldn't happen: report it with the log |
+| `link: joining Wi-Fi` or `waiting for HELLO ACK` | The reader still runs; cards show as "Offline" on the display, and aren't sent | Fix the link separately (§5) |
+
+To turn the detail off, `#define RC522_DEBUG 0` in `secrets.h`.
+
+## 7. Troubleshooting
 
 | Symptom | Check |
 |---|---|
