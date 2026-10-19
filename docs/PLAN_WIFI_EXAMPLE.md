@@ -95,7 +95,7 @@ Proposed defaults: node address `0x0301` on net `0x42` (demo master key).
 | # | Step | Done when |
 |---|---|---|
 | 1 | `node_ap` role (**done**) | A phone joins `roclink-nodes`, gets `10.42.0.x`, can't reach the LAN; `test_node.py` from a laptop on the AP gets a sealed ACK |
-| 2 | roclink-rfc node `PING` | Test vector passes; gateway publishes the `PING` record |
+| 2 | roclink-rfc node `PING` (**done**) | Test vector passes; gateway publishes the `PING` record |
 | 3 | Firmware: transport, link, config | The Heltec joins the AP; `HELLO` and `PING`s are ACKed; records appear on MQTT; a reboot doesn't reuse a counter |
 | 4 | hub role, rfidauth, demoapp | A scripted `AUTH_REQ` (a test_node variant) gets `GRANT`; an unknown UID gets result 1 |
 | 5 | Firmware: reader, ui, session | A fob tap shows "Alice: go" on the OLED; an unknown fob shows why |
