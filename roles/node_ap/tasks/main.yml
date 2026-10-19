@@ -1,11 +1,22 @@
 # The Pi's Wi-Fi as an access point for roclink Wi-Fi nodes. The Pi's own
 # uplink is Ethernet; nodes on this network can reach only the gateway's UDP
 # port (and DHCP), never the LAN or the internet.
+#
+# hostapd runs the AP, not NetworkManager: NetworkManager's AP mode on the
+# Pi 3's brcmfmac offers WPA-PSK-SHA256 next to WPA-PSK with PMF off, and
+# clients (iPhones among them) fail the handshake. hostapd with plain
+# WPA2-PSK/CCMP is the well-trodden path on a Pi.
 - name: Ethernet is up (the Pi's uplink once Wi-Fi becomes the AP)
   ansible.builtin.command: nmcli -t -g GENERAL.STATE device show {{ node_ap_uplink }}
   register: uplink
   changed_when: false
   failed_when: "'connected' not in uplink.stdout or 'disconnected' in uplink.stdout"
+
+- name: Packages
+  ansible.builtin.apt:
+    name: [hostapd, dnsmasq]
+
+# --------------------------------------------------------------- firewall
 
 - name: Firewall for the node network
   ansible.builtin.template:
@@ -14,7 +25,7 @@
     mode: "0644"
   notify: Reload the node firewall
 
-- name: Firewall service (loads only its own table, leaving NetworkManager's alone)
+- name: Firewall service (loads only its own table)
   ansible.builtin.copy:
     dest: /etc/systemd/system/roclink-ap-firewall.service
     mode: "0644"
@@ -42,12 +53,11 @@
     state: started
     daemon_reload: true
 
-- name: Apply a changed firewall now
-  ansible.builtin.meta: flush_handlers
+# ------------------------------------------- hand wlan0 from NetworkManager
 
 - name: Stop the Wi-Fi client from reconnecting
   ansible.builtin.shell: |
-    for c in $(nmcli -t -f NAME,TYPE con show | awk -F: '$2=="802-11-wireless" && $1!="{{ node_ap_conn }}" {print $1}'); do
+    for c in $(nmcli -t -f NAME,TYPE con show | awk -F: '$2=="802-11-wireless" {print $1}'); do
       if [ "$(nmcli -g connection.autoconnect con show "$c")" = "yes" ]; then
         nmcli con mod "$c" connection.autoconnect no && echo "disabled $c"
       fi
@@ -55,45 +65,96 @@
   register: client_off
   changed_when: "'disabled' in client_off.stdout"
 
-- name: The access point connection
+- name: Remove NetworkManager's AP connection (the earlier version of this role)
   community.general.nmcli:
     conn_name: "{{ node_ap_conn }}"
-    type: wifi
-    ifname: "{{ node_ap_iface }}"
-    ssid: "{{ node_ap_ssid }}"
-    wifi:
-      mode: ap
-      band: bg
-      channel: "{{ node_ap_channel }}"
-    wifi_sec:
-      key-mgmt: wpa-psk
-      psk: "{{ node_ap_psk }}"
-      proto: [rsn]
-      pairwise: [ccmp]
-      group: [ccmp]
-      pmf: 1  # disable: the Pi's brcmfmac can't do protected management frames as an AP ("key setting validation failed")
-    method4: shared
-    ip4: ["{{ node_ap_address }}"]
-    method6: disabled
-    autoconnect: true
-    state: present
-  register: ap_conn
-  no_log: true
+    state: absent
 
-- name: Is the AP active?
-  ansible.builtin.command: nmcli -t -g GENERAL.STATE con show {{ node_ap_conn }}
-  register: ap_state
-  changed_when: false
-  failed_when: false
+- name: NetworkManager leaves the AP interface alone
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/90-roclink-ap.conf
+    mode: "0644"
+    content: |
+      # Managed by ansible (roclink-gateway, role node_ap): hostapd runs this interface.
+      [keyfile]
+      unmanaged-devices=interface-name:{{ node_ap_iface }}
+  register: nm_unmanaged
 
-- name: Bring the AP up (this takes the Wi-Fi client down)
-  ansible.builtin.command: nmcli con up {{ node_ap_conn }}
-  when: ap_conn is changed or 'activated' not in ap_state.stdout
-  changed_when: true
+- name: Reload NetworkManager
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: reloaded
+  when: nm_unmanaged is changed
+
+# ------------------------------------------------- address, AP, DHCP
+
+- name: The AP interface's address
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/roclink-ap-addr.service
+    mode: "0644"
+    content: |
+      # Managed by ansible (roclink-gateway, role node_ap)
+      [Unit]
+      Description=Address of the roclink node access point
+      Before=hostapd.service dnsmasq.service
+      After=sys-subsystem-net-devices-{{ node_ap_iface }}.device
+      BindsTo=sys-subsystem-net-devices-{{ node_ap_iface }}.device
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=true
+      ExecStart=/usr/sbin/ip addr replace {{ node_ap_address }} dev {{ node_ap_iface }}
+      ExecStart=/usr/sbin/ip link set {{ node_ap_iface }} up
+      ExecStop=/usr/sbin/ip addr flush dev {{ node_ap_iface }}
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart the AP
+
+- name: hostapd config
+  ansible.builtin.template:
+    src: hostapd.conf.j2
+    dest: /etc/hostapd/hostapd.conf
+    mode: "0600"
+  notify: Restart the AP
+
+- name: dnsmasq config (DHCP for the node network only, no DNS)
+  ansible.builtin.copy:
+    dest: /etc/dnsmasq.d/roclink-ap.conf
+    mode: "0644"
+    content: |
+      # Managed by ansible (roclink-gateway, role node_ap)
+      port=0
+      interface={{ node_ap_iface }}
+      bind-interfaces
+      dhcp-range={{ node_ap_dhcp_range }},12h
+      dhcp-option=option:router
+      dhcp-option=option:dns-server
+      dhcp-authoritative
+  notify: Restart the AP
+
+- name: hostapd isn't masked (Debian ships it masked)
+  ansible.builtin.systemd:
+    name: hostapd
+    masked: false
+
+- name: Running at boot
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: [roclink-ap-addr, hostapd, dnsmasq]
+
+- name: Apply changes now
+  ansible.builtin.meta: flush_handlers
 
 - name: Check the AP and its address
   ansible.builtin.shell: |
     set -e
+    sleep 3
     /usr/sbin/iw dev {{ node_ap_iface }} info | grep -q "type AP"
+    /usr/sbin/iw dev {{ node_ap_iface }} info | grep -q "ssid {{ node_ap_ssid }}"
     ip -4 -br addr show {{ node_ap_iface }} | grep -q "{{ node_ap_address }}"
+    ss -ulpn | grep -q "dnsmasq"
   changed_when: false

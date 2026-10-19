@@ -1,12 +1,12 @@
 #!/usr/sbin/nft -f
 # {{ ansible_managed }}
 # The roclink node network ({{ node_ap_iface }}): nodes may get an address
-# (DHCP), resolve names from the Pi, ping it, and send roclink frames to
+# (DHCP), ping the Pi, and send roclink frames to
 # roclink-gw on UDP {{ roclink_udp_port }}. Nothing else: no SSH or MQTT from
 # nodes, and no forwarding to the LAN or the internet.
 #
-# Only this table is touched, so NetworkManager's own nftables rules for the
-# shared connection stay as they are; a drop here wins over their accept.
+# Only this table is touched, so other nftables rules stay as they are; a
+# drop here wins over an accept elsewhere.
 table inet roclink_ap
 delete table inet roclink_ap
 
@@ -19,8 +19,6 @@ table inet roclink_ap {
     chain from_nodes {
         ct state established,related accept
         udp dport 67 accept comment "DHCP"
-        udp dport 53 accept comment "DNS (dnsmasq)"
-        tcp dport 53 accept comment "DNS (dnsmasq)"
         icmp type echo-request accept
         udp dport {{ roclink_udp_port }} accept comment "roclink-gw"
         counter drop
