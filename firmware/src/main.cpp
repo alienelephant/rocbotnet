@@ -190,6 +190,43 @@ static bool reader_configure() {
     return held;
 }
 
+// Separates "resets when the antenna turns on" (its load sags the supply)
+// from "resets anyway" (the RST line, or a supply that can't run the chip at all).
+static void reader_reset_test() {
+    using R = MFRC522Constants::PCD_Register;
+    rfid.PCD_Init();
+    rfid.PCD_AntennaOff();
+    rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);
+    delay(200);
+    uint8_t rf = reg(R::RFCfgReg);
+    bool a_held = (rf & 0x70) == 0x70;
+    Serial.printf("[rc522] stage A, antenna off: gain set to max, 200 ms later RFCfg 0x%02X: %s; "
+                  "RST pin (GPIO%d) reads %s\n", rf, a_held ? "held" : "LOST (the chip reset)",
+                  PIN_RC522_RST, digitalRead(PIN_RC522_RST) ? "high" : "LOW");
+    rfid.PCD_AntennaOn();
+    uint8_t t1, t20, t200;
+    delay(1);
+    t1 = reg(R::TxControlReg);
+    delay(19);
+    t20 = reg(R::TxControlReg);
+    delay(180);
+    t200 = reg(R::TxControlReg);
+    rf = reg(R::RFCfgReg);
+    bool b_held = (t200 & 0x03) == 0x03 && (rf & 0x70) == 0x70;
+    Serial.printf("[rc522] stage B, antenna on: TxControl 0x%02X at 1 ms, 0x%02X at 20 ms, 0x%02X at 200 ms; "
+                  "RFCfg 0x%02X: %s\n", t1, t20, t200, rf, b_held ? "held" : "LOST");
+    if (!a_held)
+        Serial.println("[rc522] RESULT: the chip resets even with its antenna off, so it isn't the antenna's "
+                       "load. Check the RST wire (J2-14 to the module's RST): a loose RST wire resets the chip "
+                       "whenever it floats low. Then the module's 3.3V/GND wiring generally.");
+    else if (!b_held)
+        Serial.println("[rc522] RESULT: the settings hold until the antenna turns on, then the chip resets: "
+                       "its supply sags under the antenna's load. Short, direct 3V3/GND wires (J3-2, J3-1), a "
+                       "10-100 uF capacitor at the module, or another module.");
+    else
+        Serial.println("[rc522] RESULT: the settings held with the antenna on.");
+}
+
 static void reader_begin() {
     Serial.printf("[rc522] pins: SDA/SS GPIO%d, SCK GPIO%d, MOSI GPIO%d, MISO GPIO%d, RST GPIO%d\n",
                   PIN_RC522_SS, PIN_RC522_SCK, PIN_RC522_MOSI, PIN_RC522_MISO, PIN_RC522_RST);
@@ -216,6 +253,7 @@ static void reader_begin() {
     bool self_test = rfid.PCD_PerformSelfTest();
     Serial.printf("[rc522] self-test: %s\n",
                   self_test ? "PASS" : "FAIL (normal for many clones; not conclusive on its own)");
+    reader_reset_test();
 #endif
     reader_configure();
 }
