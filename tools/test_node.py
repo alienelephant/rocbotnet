@@ -55,6 +55,8 @@ def main():
     p.add_argument("--master", help="network master key, 32 hex digits (default: the demo key)")
     p.add_argument("--schema", type=int, default=1)
     p.add_argument("--text", default="hello from the test node")
+    p.add_argument("--ping", action="store_true",
+                   help="send a PING link check (schema 0, payload 01) instead of data")
     a = p.parse_args()
     net = a.net if a.net is not None else (0xF0 if a.open else 0x42)
 
@@ -63,6 +65,8 @@ def main():
     state.write_text(str(fcnt))
     seq = fcnt & 0xFF
     payload = a.text.encode()
+    if a.ping:  # PROTOCOL.md 7.1: a control message, schema 0, operation PING
+        a.schema, payload = 0, b"\x01"
 
     if a.open:
         frame = header(DATA, ACK_REQ, net, a.node, 0, seq, a.schema) + payload

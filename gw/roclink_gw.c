@@ -914,8 +914,10 @@ static void handle_frame(uint8_t *frame, size_t len, const link_t *link) {
     switch (rx.kind) {
         case ROCLINK_RX_DATA: publish_uplink(n, &rx, link); break;
         case ROCLINK_RX_CONTROL:
-            if (rx.hdr.schema == ROCLINK_SCHEMA_CONTROL && rx.payload_len == 1 && rx.payload[0] == 0x01)
-                publish_uplink(n, &rx, link); /* PING: published as schema 0, payload 01 */
+            /* The library passes only known operations (PROTOCOL.md 7.1). A PING is
+             * published as schema 0, for the hub's liveness view. */
+            if (rx.payload_len >= 1 && rx.payload[0] == ROCLINK_CONTROL_PING)
+                publish_uplink(n, &rx, link);
             break;
         case ROCLINK_RX_DUPLICATE:
             LOG_DEBUG("%02X/%04X seq %u: retransmission, not published again", n->id, rx.hdr.src, rx.hdr.seq);
