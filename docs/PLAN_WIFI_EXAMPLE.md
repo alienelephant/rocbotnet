@@ -30,28 +30,27 @@ The Pi 3's Wi-Fi chip can run an AP and a client at once, but only on one channe
 
 | Option | Hardware | For | Against |
 |---|---|---|---|
-| **A. AP and client on the built-in radio** (planned) | none | Works today | The AP follows the upstream channel: if `jv_testing` moves, the AP drops. The driver is known to be touchy in this mode. Half the airtime each. |
+| A. AP and client on the built-in radio | none | Works today | The AP follows the upstream channel: if `jv_testing` moves, the AP drops. The driver is known to be touchy in this mode. Half the airtime each. |
 | B. A USB Wi-Fi adapter for the AP | one adapter with AP support (e.g. an MT7601U or RTL8188-based dongle; check `iw list`) | Independent radios; the AP picks its own channel | One more part |
-| C. Ethernet for the Pi, built-in radio as the AP | a cable | Most robust | The Pi needs a wired drop |
+| **C. Ethernet for the Pi, built-in radio as the AP** (chosen, and set up) | a cable | Most robust | The Pi needs a wired drop |
 
-The ansible role makes the AP interface a variable, so moving from A to B or C is a config change.
+Option C is in place: the Pi is on the LAN by Ethernet at `192.168.8.237`, and its built-in radio is the AP. The role keeps the interface a variable, so a USB adapter (B) would be a config change.
 
 ### 2.2 The network
 
 | | |
 |---|---|
 | SSID | `roclink-nodes`, WPA2-PSK, passphrase in the vault |
-| Interface | `uap0`, a virtual AP interface on `wlan0` (option A) |
+| Interface | `wlan0`, channel 1 (2.4 GHz; away from the LAN AP's channel 6). PMF off: the Pi's driver can't do it as an AP |
 | Addresses | `10.42.0.0/24`; the Pi is `10.42.0.1`; DHCP from NetworkManager's shared mode (dnsmasq) |
 | Isolation | No routing from `roclink-nodes` to the LAN or the internet: nftables drops forwarding from `uap0`. Nodes reach only the Pi's UDP 3333. |
 | Gateway | `roclink-gw` already listens on `0.0.0.0:3333`: no change |
 
-### 2.3 New ansible role in roclink-gateway: `node_ap`
+### 2.3 Done: the `node_ap` role in roclink-gateway
 
-1. Create `uap0` at boot (a udev rule or a systemd unit running `iw dev wlan0 interface add uap0 type __ap`), with its own MAC address.
-2. A NetworkManager connection: `mode ap`, `ssid roclink-nodes`, `band bg`, `channel` from the upstream connection, `ipv4.method shared`, `ipv4.addresses 10.42.0.1/24`.
-3. nftables: drop forwarding from `uap0`; allow UDP 3333 and DHCP in from `uap0`, nothing else.
-4. Check: the AP is up, and a client gets an address.
+- Turns off the Wi-Fi client's autoconnect, and creates the NetworkManager AP connection `roclink-nodes` (WPA2, `ipv4.method shared`, `10.42.0.1/24`).
+- Loads its own nftables table `roclink_ap`: from the node network only DHCP, DNS, ping and UDP 3333 reach the Pi, and nothing is forwarded.
+- Checks Ethernet is up first, and that the AP and its address are up after.
 
 ## 3. The backend on the Pi
 
@@ -92,7 +91,7 @@ Proposed defaults: node address `0x0301` on net `0x42` (demo master key).
 
 | # | Step | Done when |
 |---|---|---|
-| 1 | `node_ap` role | A phone joins `roclink-nodes`, gets `10.42.0.x`, can't reach the LAN; `test_node.py` from a laptop on the AP gets a sealed ACK |
+| 1 | `node_ap` role (done; the client test is left) | A phone joins `roclink-nodes`, gets `10.42.0.x`, can't reach the LAN; `test_node.py` from a laptop on the AP gets a sealed ACK |
 | 2 | roclink-rfc node `PING` | Test vector passes; gateway publishes the `PING` record |
 | 3 | Firmware: transport, link, config | The Heltec joins the AP; `HELLO` and `PING`s are ACKed; records appear on MQTT; a reboot doesn't reuse a counter |
 | 4 | hub role, rfidauth, demoapp | A scripted `AUTH_REQ` (a test_node variant) gets `GRANT`; an unknown UID gets result 1 |
@@ -112,6 +111,5 @@ Steps 1–2 and 4 don't need the board; 3 needs only the Heltec; 5 adds the RC52
 
 ## 8. Decisions needed before starting
 
-1. **AP option A, B or C** (§2.1). A works with no new hardware; B is the one I'd buy for anything beyond a bench.
-2. **The MFRC522 library.** Both are Arduino-ESP32-compatible; MFRC522v2 is the maintained one.
-3. **Where the hub is deployed from.** It's the demo hub in `roclink_`, which stays as is: the role would copy it from there.
+1. **The MFRC522 library.** Both are Arduino-ESP32-compatible; MFRC522v2 is the maintained one.
+2. **Where the hub is deployed from.** It's the demo hub in `roclink_`, which stays as is: the role would copy it from there.
