@@ -258,6 +258,55 @@ static void test_seal_matches_vectors(void) {
     CHECK_BYTES(f, sn, VS4);
 }
 
+/* S7: a node's PING link check, sealed; the gateway opens it, sees a control
+ * message (not delivered), and ACKs it bound to the PING (PROTOCOL.md 7.1). */
+static void test_secured_ping(void) {
+    roclink_sec_t node = node_sec(ROCLINK_SEC_ENC, 8);
+    roclink_sec_t gw = gw_sec();
+    roclink_sec_peer_t peer;
+    roclink_sec_info_t opener, info;
+    roclink_fcnt_t nctr = counter_at(3), gctr = counter_at(0x200);
+    roclink_server_t server;
+    roclink_server_config_t sc;
+    roclink_peer_t peers[4];
+    roclink_client_t client;
+    roclink_client_config_t cc;
+    roclink_rx_t rx;
+    uint8_t f[ROCLINK_FRAME_MAX_LEN], ack[ROCLINK_FRAME_MAX_LEN];
+    int n, an;
+
+    cc.net_id = NET;
+    cc.node_id = NODE;
+    cc.gateway_id = ROCLINK_ADDR_ANY_GATEWAY;
+    CHECK_EQ(roclink_client_init(&client, &cc, 0x0A), ROCLINK_OK);
+    n = roclink_client_build_ping(&client, ROCLINK_SEND_ACK, f, sizeof(f));
+    CHECK_EQ(n, 10);
+    n = roclink_sec_seal(&node, &nctr, NULL, NULL, f, (size_t)n, f, sizeof(f));
+    CHECK_BYTES(f, n, VS7);
+    CHECK_EQ(n, 23); /* PROTOCOL.md 7.1: 23 bytes secured with an 8-byte tag */
+
+    memset(&peer, 0, sizeof(peer));
+    roclink_server_config_default(&sc);
+    sc.net_id = NET;
+    sc.gateway_id = GW;
+    CHECK_EQ(roclink_server_init(&server, &sc, peers, 4, 5), ROCLINK_OK);
+    n = roclink_sec_open(&gw, &peer, f, (size_t)n, &opener);
+    CHECK_EQ(n, 10);
+    roclink_server_handle_opened(&server, f, (size_t)n, 100, &opener, &rx);
+    CHECK_EQ(rx.kind, ROCLINK_RX_CONTROL);
+    CHECK(rx.ack_requested);
+    CHECK_EQ(rx.payload_len, 1);
+    CHECK_EQ(rx.payload[0], ROCLINK_CONTROL_PING);
+
+    an = roclink_server_build_ack(&server, &rx, 0, ack, sizeof(ack));
+    an = roclink_sec_seal(&gw, &gctr, &opener, &peer, ack, (size_t)an, ack, sizeof(ack));
+    CHECK(an > 0);
+    an = roclink_sec_open(&node, NULL, ack, (size_t)an, &info); /* the node takes the ACK */
+    CHECK_EQ(an, ROCLINK_HEADER_LEN);
+    roclink_client_handle(&client, ack, (size_t)an, &rx);
+    CHECK_EQ(rx.kind, ROCLINK_RX_ACK);
+}
+
 /* ------------------------------------------------------ the full exchange */
 
 static void test_secured_exchange(void) {
@@ -1132,6 +1181,7 @@ int main(void) {
     RUN(test_key_derivation);
     RUN(test_frame_counter);
     RUN(test_seal_matches_vectors);
+    RUN(test_secured_ping);
     RUN(test_secured_exchange);
     RUN(test_secured_dedupe_ignores_seq);
     RUN(test_tampering_is_rejected);

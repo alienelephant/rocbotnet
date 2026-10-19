@@ -113,6 +113,8 @@ static void test_downlink_and_duplicates(void) {
     uint8_t ack[16];
     const uint8_t v4[] = {0x24, 0x00, 0x42, 0x34, 0x12, 0x01, 0xFF, 0x90, 0x00};
     const uint8_t cmd[] = {0x3C, 0x00};
+    const uint8_t ping[] = {ROCLINK_CONTROL_PING};
+    const uint8_t unknown[] = {0x02};
     size_t n;
     int an;
 
@@ -141,9 +143,51 @@ static void test_downlink_and_duplicates(void) {
     roclink_client_handle(&c, f, n, &rx); /* a new seq: new downlink */
     CHECK_EQ(rx.kind, ROCLINK_RX_DATA);
 
-    n = gw_frame(f, ROCLINK_TYPE_DATA, 0, 0xFF02, NODE, 0x92, ROCLINK_SCHEMA_CONTROL, NULL, 0);
-    roclink_client_handle(&c, f, n, &rx);
+    n = gw_frame(f, ROCLINK_TYPE_DATA, ROCLINK_FLAG_ACK_REQ, 0xFF02, NODE, 0x92,
+                 ROCLINK_SCHEMA_CONTROL, ping, sizeof(ping));
+    roclink_client_handle(&c, f, n, &rx); /* "are you there?" from a gateway */
     CHECK_EQ(rx.kind, ROCLINK_RX_CONTROL);
+    CHECK(rx.ack_requested);
+
+    /* An unknown control operation, or none, is malformed: dropped, not ACKed. */
+    n = gw_frame(f, ROCLINK_TYPE_DATA, ROCLINK_FLAG_ACK_REQ, 0xFF02, NODE, 0x93,
+                 ROCLINK_SCHEMA_CONTROL, unknown, sizeof(unknown));
+    roclink_client_handle(&c, f, n, &rx);
+    CHECK_EQ(rx.kind, ROCLINK_RX_DROP);
+    CHECK_EQ(rx.status, ROCLINK_E_MALFORMED);
+    CHECK(!rx.ack_requested);
+    n = gw_frame(f, ROCLINK_TYPE_DATA, 0, 0xFF02, NODE, 0x94, ROCLINK_SCHEMA_CONTROL, NULL, 0);
+    roclink_client_handle(&c, f, n, &rx);
+    CHECK_EQ(rx.status, ROCLINK_E_MALFORMED);
+    n = gw_frame(f, ROCLINK_TYPE_DATA, 0, 0xFF02, NODE, 0x93, 10, cmd, sizeof(cmd));
+    roclink_client_handle(&c, f, n, &rx); /* the dropped frames left no state behind */
+    CHECK_EQ(rx.kind, ROCLINK_RX_DATA);
+}
+
+static void test_build_ping(void) {
+    roclink_client_t c = make_client(ROCLINK_ADDR_ANY_GATEWAY);
+    /* PROTOCOL.md 7.1: schema 0, payload = the PING operation; 10 bytes. */
+    const uint8_t check[] = {0x20, 0x03, 0x42, 0x34, 0x12, 0x00, 0x00, 0x07, 0x00, 0x01};
+    uint8_t out[16];
+    int n;
+
+    n = roclink_client_build_ping(&c, ROCLINK_SEND_ACK, out, sizeof(out)); /* a link check */
+    CHECK_BYTES(out, n, check);
+    CHECK(roclink_client_awaiting_ack(&c));
+    CHECK_EQ(roclink_client_next_seq(&c), 8);
+
+    n = roclink_client_build_ping(&c, ROCLINK_SEND_DEFAULT, out, sizeof(out)); /* a heartbeat */
+    CHECK_EQ(n, 10);
+    CHECK_EQ(out[1], 0);
+    CHECK(!roclink_client_awaiting_ack(&c));
+
+    n = roclink_client_build_ping(&c, ROCLINK_SEND_LISTEN, out, sizeof(out)); /* a poll */
+    CHECK_EQ(out[1], ROCLINK_FLAG_LISTEN);
+
+    CHECK_EQ(roclink_client_build_ping(NULL, 0, out, sizeof(out)), ROCLINK_E_ARG);
+    CHECK_EQ(roclink_client_build_ping(&c, 0x80, out, sizeof(out)), ROCLINK_E_ARG);
+    CHECK_EQ(roclink_client_build_ping(&c, 0, out, 9), ROCLINK_E_NOSPACE);
+    CHECK_EQ(roclink_client_next_seq(&c), 10); /* failures do not consume a seq */
 }
 
 static void test_filtering(void) {
@@ -195,6 +239,7 @@ static void test_filtering(void) {
 int main(void) {
     RUN(test_init_rejects);
     RUN(test_build_data);
+    RUN(test_build_ping);
     RUN(test_ack_matching);
     RUN(test_downlink_and_duplicates);
     RUN(test_filtering);

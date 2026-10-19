@@ -115,6 +115,9 @@ def main():
                    fcnt=0x100, enc=True, tag_len=8, gen=gen, binding=1)
     v["S4"] = seal(fk0, header(DATA, 0x09 | SECURED, net, gw, node, 0x90, 0x0A), b"\x3c\x00",
                    fcnt=0x101, enc=True, tag_len=8, gen=gen, binding=1)
+    # S7: a PING link check (PROTOCOL.md 7.1): schema 0, payload = operation 0x01
+    v["S7"] = seal(fk0, header(DATA, 0x03 | SECURED, net, node, 0x0000, 0x0A, 0x00), b"\x01",
+                   fcnt=3, enc=True, tag_len=8, gen=gen)
     # S6: the first frame of epoch 1 (fcnt 0x00010000), under FK(1)
     v["S6"] = seal(fk1, header(DATA, 0x02 | SECURED, net, node, 0x0000, 9, 0x20), bme,
                    fcnt=0x00010000, enc=True, tag_len=8, gen=gen)

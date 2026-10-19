@@ -176,11 +176,16 @@ roclink_status_t roclink_client_init(roclink_client_t *c, const roclink_client_c
     return ROCLINK_OK;
 }
 
-int roclink_client_build_data(roclink_client_t *c, uint8_t schema, const uint8_t *data,
-                              size_t len, uint8_t options, uint8_t *out, size_t out_cap) {
+/* A schema-0 DATA frame must carry a control operation this version knows
+ * (PROTOCOL.md 7.1): anything else is malformed, and not ACKed. */
+static bool control_ok(const roclink_header_t *h, const uint8_t *payload, size_t len) {
+    return h->schema != ROCLINK_SCHEMA_CONTROL || (len >= 1 && payload[0] == ROCLINK_CONTROL_PING);
+}
+
+static int build_uplink(roclink_client_t *c, uint8_t schema, const uint8_t *data, size_t len,
+                        uint8_t options, uint8_t *out, size_t out_cap) {
     roclink_header_t h;
     int n;
-    if (!c || schema == ROCLINK_SCHEMA_CONTROL) return ROCLINK_E_ARG;
     if (options & ~(uint8_t)(ROCLINK_SEND_ACK | ROCLINK_SEND_LISTEN)) return ROCLINK_E_ARG;
 
     h.type = ROCLINK_TYPE_DATA;
@@ -200,6 +205,18 @@ int roclink_client_build_data(roclink_client_t *c, uint8_t schema, const uint8_t
     c->awaiting_ack = (h.flags & ROCLINK_FLAG_ACK_REQ) != 0;
     c->ack_seq = h.seq;
     return n;
+}
+
+int roclink_client_build_data(roclink_client_t *c, uint8_t schema, const uint8_t *data,
+                              size_t len, uint8_t options, uint8_t *out, size_t out_cap) {
+    if (!c || schema == ROCLINK_SCHEMA_CONTROL) return ROCLINK_E_ARG;
+    return build_uplink(c, schema, data, len, options, out, out_cap);
+}
+
+int roclink_client_build_ping(roclink_client_t *c, uint8_t options, uint8_t *out, size_t out_cap) {
+    const uint8_t op = ROCLINK_CONTROL_PING;
+    if (!c) return ROCLINK_E_ARG;
+    return build_uplink(c, ROCLINK_SCHEMA_CONTROL, &op, 1, options, out, out_cap);
 }
 
 
@@ -246,6 +263,10 @@ void roclink_client_handle(roclink_client_t *c, const uint8_t *frame, size_t len
         c->awaiting_ack = false;
         rx->kind = ROCLINK_RX_ACK;
     } else {
+        if (!control_ok(h, rx->payload, rx->payload_len)) {
+            drop(rx, ROCLINK_E_MALFORMED);
+            return;
+        }
         /* DATA. The hub numbers each node's downlink (PROTOCOL.md 9 rule 3), so
          * a re-offer keeps its seq even through another gateway, and a new
          * downlink always has a new one: seq alone decides. */
@@ -409,6 +430,10 @@ void roclink_server_handle_opened(roclink_server_t *s, const uint8_t *frame, siz
 
     if (h->type == ROCLINK_TYPE_ACK) {
         rx->kind = ROCLINK_RX_ACK; /* the caller matches hdr.seq to its downlink */
+        return;
+    }
+    if (!control_ok(h, rx->payload, rx->payload_len)) {
+        drop(rx, ROCLINK_E_MALFORMED); /* no peer state touched, no ACK */
         return;
     }
 

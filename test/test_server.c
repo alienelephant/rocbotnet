@@ -86,10 +86,54 @@ static void test_uplink_and_ack(void) {
     CHECK(!rx.listening);
     CHECK_EQ(roclink_server_build_ack(&s, &rx, 0, ack, sizeof(ack)), ROCLINK_E_ARG);
 
+    /* node_frame's payload starts with 0x01: a PING, with a body this version
+     * ignores (PROTOCOL.md 7.1: later versions may add fields). */
     n = node_frame(f, ROCLINK_TYPE_DATA, ROCLINK_FLAG_LISTEN, NODE, GW, 9, ROCLINK_SCHEMA_CONTROL);
     roclink_server_handle(&s, f, n, 1900, &rx);
     CHECK_EQ(rx.kind, ROCLINK_RX_CONTROL);
     CHECK(rx.listening);
+}
+
+static void test_ping_and_unknown_control(void) {
+    roclink_server_t s = make_server(true);
+    roclink_rx_t rx;
+    uint8_t f[ROCLINK_FRAME_MAX_LEN], ack[16];
+    roclink_header_t h;
+    const uint8_t ping[] = {ROCLINK_CONTROL_PING};
+    const uint8_t unknown[] = {0x02};
+    int n;
+
+    h.type = ROCLINK_TYPE_DATA;
+    h.flags = ROCLINK_FLAG_ACK_REQ | ROCLINK_FLAG_LISTEN;
+    h.net_id = NET;
+    h.src = NODE;
+    h.dst = ROCLINK_ADDR_ANY_GATEWAY;
+    h.seq = 20;
+    h.schema = ROCLINK_SCHEMA_CONTROL;
+    h.relay = 0;
+
+    /* A link check: ACKed, not delivered. */
+    n = roclink_encode(&h, ping, sizeof(ping), f, sizeof(f));
+    roclink_server_handle(&s, f, (size_t)n, 100, &rx);
+    CHECK_EQ(rx.kind, ROCLINK_RX_CONTROL);
+    CHECK(rx.ack_requested);
+    CHECK(roclink_server_build_ack(&s, &rx, 0, ack, sizeof(ack)) == ROCLINK_HEADER_LEN);
+
+    /* An unknown operation, or none: malformed, not ACKed, no state touched. */
+    h.seq = 21;
+    n = roclink_encode(&h, unknown, sizeof(unknown), f, sizeof(f));
+    roclink_server_handle(&s, f, (size_t)n, 200, &rx);
+    CHECK_EQ(rx.kind, ROCLINK_RX_DROP);
+    CHECK_EQ(rx.status, ROCLINK_E_MALFORMED);
+    CHECK(!rx.ack_requested);
+    n = roclink_encode(&h, NULL, 0, f, sizeof(f));
+    roclink_server_handle(&s, f, (size_t)n, 300, &rx);
+    CHECK_EQ(rx.status, ROCLINK_E_MALFORMED);
+
+    /* seq 21 was never accepted, so a real frame with it isn't a duplicate. */
+    n = roclink_encode(&h, ping, sizeof(ping), f, sizeof(f));
+    roclink_server_handle(&s, f, (size_t)n, 400, &rx);
+    CHECK_EQ(rx.kind, ROCLINK_RX_CONTROL);
 }
 
 static void test_answer_any(void) {
@@ -246,6 +290,7 @@ static void test_clock_wrap(void) {
 int main(void) {
     RUN(test_init_rejects);
     RUN(test_uplink_and_ack);
+    RUN(test_ping_and_unknown_control);
     RUN(test_answer_any);
     RUN(test_filtering);
     RUN(test_downlink_seq_is_per_node);

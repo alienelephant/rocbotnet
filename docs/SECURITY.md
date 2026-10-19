@@ -2,7 +2,7 @@
 
 The wire format and rules are normative in [PROTOCOL.md §10](PROTOCOL.md#10-security). This document explains what that design protects, against whom, what it deliberately doesn't cover, and what a deployment must do for the protection to hold.
 
-**Status:** under review for 0.3. Implemented in `src/roclink_secure.c` (security, CCM, CMAC and key derivation) and `src/roclink_aes.c` (the platform AES providers), including the 0.3 rule changes (PROTOCOL.md §13.1), the forward-secure ratchet, revocation and clone detection; `PING` and session mode are specified but not built yet. The secured reference sketches are `examples/arduino/lora_secure_sender` and `lora_secure_receiver`. It builds for ESP32 and ESP32-S3 and passes its tests on the PC with every provider; it hasn't yet been run on the boards themselves. Per-session forward secrecy, over-the-air pairing and signed commands are [future work](#future-work).
+**Status:** under review for 0.3. Implemented in `src/roclink_secure.c` (security, CCM, CMAC and key derivation) and `src/roclink_aes.c` (the platform AES providers), including the 0.3 rule changes (PROTOCOL.md §13.1), the forward-secure ratchet, revocation and clone detection; the node's `PING` too; session mode is specified but not built yet. The secured reference sketches are `examples/arduino/lora_secure_sender` and `lora_secure_receiver`. It builds for ESP32 and ESP32-S3 and passes its tests on the PC with every provider; it hasn't yet been run on the boards themselves. Per-session forward secrecy, over-the-air pairing and signed commands are [future work](#future-work).
 
 ## What we protect
 

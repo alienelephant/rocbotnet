@@ -90,6 +90,10 @@ extern "C" {
  * FPort. Schema 0 is roclink's own control messages; applications use 1..255. */
 #define ROCLINK_SCHEMA_CONTROL 0u
 
+/* Control operations: the first payload byte of a schema-0 DATA frame
+ * (PROTOCOL.md section 7.1). Receivers drop any other operation as malformed. */
+#define ROCLINK_CONTROL_PING 0x01u
+
 /* ---------------------------------------------------------- frame types */
 
 #define ROCLINK_TYPE_DATA 0u
@@ -315,13 +319,26 @@ int roclink_client_build_data(roclink_client_t *c, uint8_t schema, const uint8_t
                               size_t len, uint8_t options, uint8_t *out, size_t out_cap);
 
 /*
+ * Builds a PING (PROTOCOL.md section 7.1): a schema-0 DATA frame whose payload
+ * is the one operation byte ROCLINK_CONTROL_PING. `options` as for
+ * roclink_client_build_data():
+ *   ROCLINK_SEND_DEFAULT  "I'm alive": a heartbeat, no reply expected
+ *   ROCLINK_SEND_ACK      a link check: the gateway's ACK proves it's reachable
+ *   ROCLINK_SEND_LISTEN   a poll: "send me anything queued"
+ * Consumes a sequence number like any DATA frame. Returns the frame length
+ * (10 bytes unsecured) or a negative roclink_status_t.
+ */
+int roclink_client_build_ping(roclink_client_t *c, uint8_t options, uint8_t *out, size_t out_cap);
+
+/*
  * Interprets one received frame. Fills `rx`:
  *   ROCLINK_RX_ACK        the frame we were waiting on was acknowledged
  *   ROCLINK_RX_DATA       new downlink: deliver rx->payload to the application
  *   ROCLINK_RX_DUPLICATE  repeat of the last downlink (same seq, from any
  *                         gateway): do not deliver
- *   ROCLINK_RX_CONTROL    schema 0, reserved: do not deliver
- *   ROCLINK_RX_DROP       not for us; rx->status says why
+ *   ROCLINK_RX_CONTROL    a schema-0 control message (a PING): do not deliver
+ *   ROCLINK_RX_DROP       not for us, or a control operation this version doesn't
+ *                         know (ROCLINK_E_MALFORMED, not ACKed); rx->status says why
  * With security, pass frames through roclink_sec_open() first; a frame that
  * is still secured is dropped with ROCLINK_E_POLICY.
  * If rx->ack_requested, send roclink_client_build_ack(). If rx->more, keep
@@ -404,7 +421,8 @@ roclink_status_t roclink_server_init(roclink_server_t *s, const roclink_server_c
  * Interprets one received frame. Fills `rx`:
  *   ROCLINK_RX_DATA       new uplink: deliver rx->payload to the application
  *   ROCLINK_RX_DUPLICATE  retransmission already delivered: do not deliver
- *   ROCLINK_RX_CONTROL    schema 0, reserved: do not deliver
+ *   ROCLINK_RX_CONTROL    a schema-0 control message (a PING): do not deliver,
+ *                         but ACK it if asked
  *   ROCLINK_RX_ACK        node acknowledged downlink rx->hdr.seq
  *   ROCLINK_RX_DROP       not for us; rx->status says why
  * rx->ack_requested: send roclink_server_build_ack() (duplicates too).
