@@ -1,0 +1,20 @@
+# rfidprox
+
+An RFID authentication proxy for boxes on a roclink network. A person taps a fob on the proxy; the proxy asks the backend, over encrypted roclink through the rf gateways, whether that person may use the attached box now. While a session is open, it carries the box's messages to the backend and the replies back. Without one, nothing the box says leaves the proxy.
+
+Built for the roclink scavenger hunt, where each puzzle box gets one proxy, but the box can be any device with a UART.
+
+**Status: design.** No code yet. The documents are for review first.
+
+| Document | |
+|---|---|
+| [docs/DESIGN.md](docs/DESIGN.md) | **Start here.** Architecture, trust model, flows, the proxy's states, the backend's parts, security, what changes elsewhere |
+| [docs/BOXLINK.md](docs/BOXLINK.md) | The UART protocol between a box and its proxy |
+| [docs/BACKEND.md](docs/BACKEND.md) | The roclink messages between the proxy and the backend, and the rfidauth service |
+| [docs/HARDWARE.md](docs/HARDWARE.md) | Boards, wiring, power, bill of materials |
+
+Related repositories: `roclink-rfc` (the protocol and library), `roclink-gateway` (the Pi gateway), `roclink-scavhunt` (the game).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
