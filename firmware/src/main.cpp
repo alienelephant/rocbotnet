@@ -359,6 +359,7 @@ static void reader_report() {
         Serial.printf("[rc522] the antenna is off again%s: initialising the chip again (%lu resets so far)\n",
                       reader_was_reset() ? " and its settings are back to power-on values (it RESET)" : "",
                       (unsigned long)++dbg_resets);
+        if (drive + 1 < N_DRIVES) drive++;  // it reset at this level while in use: go weaker
         reader_configure();
     }
     if (!reader_ok && v != 0x00 && v != 0xFF) {
