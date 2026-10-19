@@ -1,0 +1,133 @@
+# roclink-hub configuration. Every setting except [database] path has the
+# default shown, unless it says otherwise.
+
+log_level = "INFO"
+
+# Private and service uplinks. Kept for good.
+[database]
+path = "/var/lib/roclink-hub/hub.db"
+# Small state files: the anti-replay windows (ingest, router) and the downlink
+# queue. Default: the directory of path.
+# state_dir = "/var/lib/roclink-hub"
+
+[mqtt]
+host = "localhost"
+port = 1883
+# Keep client_id fixed: the broker keeps this session's QoS 1 messages while
+# the hub is down, and delivers them when it reconnects. The router uses
+# "<client_id>-router".
+client_id = "roclink-hub"
+# Gateways publish uplinks to roclink/in/<net>/<gateway>/up, ids in hex
+# (roclink/in/42/ff01/up), and the frames they dropped to .../rejected
+# (docs/GATEWAY_INTERFACE.md).
+topics = ["roclink/in/+/+/up"]
+rejected_topics = ["roclink/in/+/+/rejected"]
+qos = 1
+keepalive_s = 60
+# username = "roclink-hub"
+# password = "..."
+tls = false
+# ca_file = "/etc/roclink-hub/ca.crt"   # unset with tls = true: the system CAs
+
+[writer]
+batch_size = 200         # most messages per transaction
+flush_interval_s = 0.5   # longest a message waits for its batch to fill
+queue_size = 10000       # messages buffered between ingest and each writer
+dedupe_window_s = 60     # unsecured duplicates: same seq, schema and payload within this
+stats_interval_s = 60
+prune_interval_s = 60    # how often public.db is pruned
+
+# Read-only API over hub.db. It has no auth: keep it on localhost.
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 8080
+
+# Counts dropped frames (gateways' reports and the hub's own drops) per
+# window. Summaries go to `topic` and hub.db's rejections table; anything
+# "high" or "critical" also goes to `topic` as soon as it happens.
+[monitor]
+window_s = 60
+burst = 20          # this many auth/replay/policy/peers_full from one source: "high"
+topic = "roclink/ops/rejected"
+max_keys = 1000     # summaries per window; past this, counted by reason only
+
+# Delivers uplinks to services (roclink/svc/<service>/up) and to the public
+# topic. Who may read which topic is the broker's ACL (deploy/mosquitto.acl).
+[router]
+enabled = true
+service_topic = "roclink/svc/{service}/up"
+public_topic = "roclink/pub/up"
+
+# One [[route]] per rule. An uplink goes to every service with a matching
+# route, once. Matching is on the verified envelope: net, and optionally
+# message schemas, nodes and device types. The service name is also its broker username.
+# The same routes say what downlink a service may send: to those nodes, with those schemas.
+# Uplinks with security "none" are delivered only with allow_insecure = true.
+# (No routes by default; these are examples.)
+[[route]]
+service = "scavhunt"
+net = 0x42
+schemas = [20, 21]                     # omit: every schema
+nodes = ["0x0100-0x01FF", "0x1234"]    # omit: every node
+# types = ["room-sensor"]              # omit: any device type
+# allow_insecure = false
+
+# The public net: for developers testing devices with no keys and no account.
+# Gateways must accept security "none" on this net only (policy allow-none),
+# and require-enc on every other. Everything on it is visible to anyone and
+# may be forged. It's stored apart, in public.db, and deleted after
+# retention_h. It's never routed to a service.
+# (Off by default; this is an example.)
+[public]
+nets = [0xF0]
+db_path = "/var/lib/roclink-hub/public.db"
+retention_h = 24
+max_per_minute = 600            # all public nodes together; the rest is dropped
+max_per_node_per_minute = 30
+
+# Read-only API over public.db only, for the public page. Off by default.
+[public.api]
+enabled = true
+host = "127.0.0.1"   # put a reverse proxy in front rather than exposing the Pi
+port = 8081
+
+# Device types: message schemas belong to a device type, each maker's firmware
+# and data model (PROTOCOL.md §5), so the hub decodes by (device type, schema). `class`
+# is "sleepy" (downlink waits for the node's next listen window) or
+# "always_listening" (downlink is sent at once). Decoders: env, event, text
+# (roclink_hub/decoders.py). (Examples; none by default.)
+[[device_type]]
+name = "room-sensor"     # examples/c
+class = "sleepy"
+schemas = { 1 = "env", 2 = "event" }
+
+[[device_type]]
+name = "boiler-valve"
+class = "always_listening"
+schemas = { 1 = "text" }
+
+# Which nodes are which device type. The first matching entry wins.
+[[node]]
+net = 0x42
+nodes = ["0x1234", "0x1235"]
+type = "room-sensor"
+
+[[node]]
+net = 0x42
+nodes = ["0x0200-0x02FF"]
+type = "boiler-valve"
+
+# Decoders for nodes that aren't registered above, by schema alone.
+[schemas]
+1 = "text"    # the Arduino sketches send text with schema 1
+
+# Downlink: services ask on roclink/svc/<service>/down; the hub numbers it per
+# node and sends it through the gateway that heard the node last
+# (GATEWAY_INTERFACE.md §5). These are the defaults.
+[downlink]
+enabled = true
+ttl_s = 3600            # the longest a downlink may wait for its node
+offer_window_s = 600    # a sleepy node's offer lasts until its next listen window, or this
+offer_now_s = 30        # an always-listening node's offer
+max_attempts = 5

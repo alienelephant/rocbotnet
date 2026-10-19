@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roclink-hub"
+version = "0.1.0"
+description = "Drains roclink uplinks from MQTT into SQLite"
+readme = "README.md"
+license = {text = "MIT"}
+# 3.11 is Raspberry Pi OS Bookworm's Python.
+requires-python = ">=3.11"
+dependencies = ["paho-mqtt>=2.0,<3"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+roclink-hub = "roclink_hub.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["roclink_hub*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

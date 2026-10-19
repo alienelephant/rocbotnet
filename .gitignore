@@ -1,0 +1,7 @@
+.venv/
+*.db
+*.db-wal
+*.db-shm
+dev.toml
+*.egg-info/
+__pycache__/

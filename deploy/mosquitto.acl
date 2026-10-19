@@ -1,0 +1,41 @@
+# Mosquitto ACL for roclink-hub. /etc/mosquitto/conf.d/roclink.conf:
+#
+#   per_listener_settings false
+#   allow_anonymous true          # anonymous may only read roclink/pub (below)
+#   password_file /etc/mosquitto/passwd
+#   acl_file /etc/mosquitto/roclink.acl
+#   max_queued_messages 100000
+#
+# Adding a service: add a [[route]] for it, and a broker user with the same
+# name (mosquitto_passwd /etc/mosquitto/passwd <service>). The pattern lines
+# give that user its own subtree and nothing else.
+
+# Before any "user" line: anonymous clients. Read the public topic, nothing else.
+topic read roclink/pub/#
+
+# Gateways publish what they hear (.../up), what they drop (.../rejected) and
+# what became of each downlink (.../down_status), and read the downlink the
+# hub hands them (PROTOCOL.md Annex B.4).
+user roclink-gw
+topic write roclink/in/#
+topic read roclink/out/#
+
+# The hub reads gateways, writes deliveries, and passes downlink on.
+user roclink-hub
+topic read roclink/in/#
+topic write roclink/svc/#
+topic write roclink/pub/#
+topic write roclink/ops/#
+topic write roclink/out/#
+# Downlink requests from services.
+topic read roclink/svc/+/down
+
+# Operators: rejection summaries and alerts. Never give these to services or
+# anonymous clients: they show which nodes exist and what was noticed.
+user roclink-ops
+topic read roclink/ops/#
+
+# Every named user is a service: read its own deliveries and downlink
+# statuses, write its downlink requests.
+pattern read roclink/svc/%u/#
+pattern write roclink/svc/%u/down
