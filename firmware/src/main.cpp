@@ -158,6 +158,38 @@ static void reader_probe() {
     }
 }
 
+// The chip's settings after a reset are TxControl 0x80 and RFCfg 0x48. Seeing
+// them after init means it reset itself since: almost always its 3.3 V
+// supply dipping when the antenna (its biggest load) turned on.
+static bool reader_was_reset() {
+    using R = MFRC522Constants::PCD_Register;
+    return reg(R::TxControlReg) == 0x80 && reg(R::RFCfgReg) == 0x48;
+}
+
+static uint32_t dbg_resets;
+
+// Initialise, maximum gain, antenna on; then check the settings held.
+static bool reader_configure() {
+    rfid.PCD_Init();
+    rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);  // 48 dB: the best range
+    rfid.PCD_AntennaOn();
+    delay(50);  // a supply that sags under the antenna's load resets the chip within this
+    uint8_t tx = reg(MFRC522Constants::TxControlReg);
+    bool held = (tx & 0x03) == 0x03 && rfid.PCD_GetAntennaGain() == MFRC522Constants::RxGain_max;
+    Serial.printf("[rc522] antenna %s (TxControlReg 0x%02X), receiver gain 0x%02X (max 0x70)%s\n",
+                  (tx & 0x03) == 0x03 ? "ON" : "OFF", tx, rfid.PCD_GetAntennaGain(),
+                  held ? "" : reader_was_reset() ? ": the chip RESET itself after the antenna turned on"
+                                                 : ": settings didn't hold");
+    if (!held && reader_was_reset()) {
+        dbg_resets++;
+        Serial.println("[rc522] VERDICT: its 3.3 V supply collapses under the antenna's load (50-100 mA), so "
+                       "the chip browns out and resets. Power it straight from J3-2/J3-3 and J3-1 with short "
+                       "wires (not through breadboard rails), add a 10-100 uF capacitor across the module's "
+                       "3.3V and GND pins, and measure 3.3 V there while it runs.");
+    }
+    return held;
+}
+
 static void reader_begin() {
     Serial.printf("[rc522] pins: SDA/SS GPIO%d, SCK GPIO%d, MOSI GPIO%d, MISO GPIO%d, RST GPIO%d\n",
                   PIN_RC522_SS, PIN_RC522_SCK, PIN_RC522_MOSI, PIN_RC522_MISO, PIN_RC522_RST);
@@ -184,13 +216,8 @@ static void reader_begin() {
     bool self_test = rfid.PCD_PerformSelfTest();
     Serial.printf("[rc522] self-test: %s\n",
                   self_test ? "PASS" : "FAIL (normal for many clones; not conclusive on its own)");
-    rfid.PCD_Init();
 #endif
-    rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);  // 48 dB: the best range
-    rfid.PCD_AntennaOn();
-    uint8_t tx = reg(MFRC522Constants::TxControlReg);
-    Serial.printf("[rc522] antenna %s (TxControlReg 0x%02X), receiver gain 0x%02X (max 0x70)\n",
-                  (tx & 0x03) == 0x03 ? "ON" : "OFF", tx, rfid.PCD_GetAntennaGain());
+    reader_configure();
 }
 
 // One poll: asks any card in the field to answer (REQA). Returns true with a
@@ -253,6 +280,12 @@ static void reader_report() {
                   (tx & 0x03) == 0x03 ? "on" : "OFF",
                   state == State::joining ? "joining Wi-Fi" : state == State::hello ? "waiting for HELLO ACK"
                   : state == State::idle ? "ready" : "waiting for GRANT");
+    if (reader_ok && (tx & 0x03) != 0x03) {
+        Serial.printf("[rc522] the antenna is off again%s: initialising the chip again (%lu resets so far)\n",
+                      reader_was_reset() ? " and its settings are back to power-on values (it RESET)" : "",
+                      (unsigned long)++dbg_resets);
+        reader_configure();
+    }
     if (!reader_ok && v != 0x00 && v != 0xFF) {
         Serial.println("[rc522] the reader answers now: initialising it again");
         reader_begin();
