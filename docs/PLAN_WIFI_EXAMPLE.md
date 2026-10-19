@@ -40,17 +40,20 @@ Option C is in place: the Pi is on the LAN by Ethernet at `192.168.8.237`, and i
 
 | | |
 |---|---|
-| SSID | `roclink-nodes`, WPA2-PSK, passphrase in the vault |
+| SSID | `roclink-nodes`, WPA2-PSK (CCMP), passphrase in the vault (a demo value, `roclink-demo`, for now) |
 | Interface | `wlan0`, channel 1 (2.4 GHz; away from the LAN AP's channel 6). PMF off: the Pi's driver can't do it as an AP |
-| Addresses | `10.42.0.0/24`; the Pi is `10.42.0.1`; DHCP from NetworkManager's shared mode (dnsmasq) |
-| Isolation | No routing from `roclink-nodes` to the LAN or the internet: nftables drops forwarding from `uap0`. Nodes reach only the Pi's UDP 3333. |
+| Addresses | `10.42.0.0/24`; the Pi is `10.42.0.1`; DHCP from dnsmasq (`10.42.0.50`–`.250`), with no router or DNS offered |
+| Isolation | No routing from `roclink-nodes` to the LAN or the internet: nftables drops forwarding from `wlan0`. Nodes reach only DHCP, ping and the Pi's UDP 3333. |
 | Gateway | `roclink-gw` already listens on `0.0.0.0:3333`: no change |
 
 ### 2.3 Done: the `node_ap` role in roclink-gateway
 
-- Turns off the Wi-Fi client's autoconnect, and creates the NetworkManager AP connection `roclink-nodes` (WPA2, `ipv4.method shared`, `10.42.0.1/24`).
-- Loads its own nftables table `roclink_ap`: from the node network only DHCP, DNS, ping and UDP 3333 reach the Pi, and nothing is forwarded.
-- Checks Ethernet is up first, and that the AP and its address are up after.
+- **hostapd** runs the AP (WPA2-PSK, CCMP, no PMF), and NetworkManager leaves `wlan0` unmanaged. NetworkManager's own AP mode was tried first: on the Pi 3's brcmfmac it advertised `WPA-PSK-SHA256` alongside `WPA-PSK`, and an iPhone failed the handshake with the right password.
+- **dnsmasq** gives out addresses on `wlan0` only, with DNS off; a oneshot unit sets `10.42.0.1/24`.
+- **nftables**, its own table `roclink_ap`: from the node network only DHCP, ping and UDP 3333 reach the Pi, and nothing is forwarded.
+- The Wi-Fi client connection is kept, with autoconnect off.
+
+Checked: an iPhone joins, gets `10.42.0.212`, and its other traffic is dropped.
 
 ## 3. The backend on the Pi
 
@@ -91,7 +94,7 @@ Proposed defaults: node address `0x0301` on net `0x42` (demo master key).
 
 | # | Step | Done when |
 |---|---|---|
-| 1 | `node_ap` role (done; the client test is left) | A phone joins `roclink-nodes`, gets `10.42.0.x`, can't reach the LAN; `test_node.py` from a laptop on the AP gets a sealed ACK |
+| 1 | `node_ap` role (**done**) | A phone joins `roclink-nodes`, gets `10.42.0.x`, can't reach the LAN; `test_node.py` from a laptop on the AP gets a sealed ACK |
 | 2 | roclink-rfc node `PING` | Test vector passes; gateway publishes the `PING` record |
 | 3 | Firmware: transport, link, config | The Heltec joins the AP; `HELLO` and `PING`s are ACKed; records appear on MQTT; a reboot doesn't reuse a counter |
 | 4 | hub role, rfidauth, demoapp | A scripted `AUTH_REQ` (a test_node variant) gets `GRANT`; an unknown UID gets result 1 |
