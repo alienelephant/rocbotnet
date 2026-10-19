@@ -1,0 +1,99 @@
+# The Pi's Wi-Fi as an access point for roclink Wi-Fi nodes. The Pi's own
+# uplink is Ethernet; nodes on this network can reach only the gateway's UDP
+# port (and DHCP), never the LAN or the internet.
+- name: Ethernet is up (the Pi's uplink once Wi-Fi becomes the AP)
+  ansible.builtin.command: nmcli -t -g GENERAL.STATE device show {{ node_ap_uplink }}
+  register: uplink
+  changed_when: false
+  failed_when: "'connected' not in uplink.stdout or 'disconnected' in uplink.stdout"
+
+- name: Firewall for the node network
+  ansible.builtin.template:
+    src: roclink-ap.nft.j2
+    dest: /etc/roclink-ap.nft
+    mode: "0644"
+  notify: Reload the node firewall
+
+- name: Firewall service (loads only its own table, leaving NetworkManager's alone)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/roclink-ap-firewall.service
+    mode: "0644"
+    content: |
+      # Managed by ansible (roclink-gateway, role node_ap)
+      [Unit]
+      Description=Firewall for the roclink node access point
+      Before=network-pre.target
+      Wants=network-pre.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=true
+      ExecStart=/usr/sbin/nft -f /etc/roclink-ap.nft
+      ExecStop=/usr/sbin/nft delete table inet roclink_ap
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload the node firewall
+
+- name: Firewall on before the AP comes up
+  ansible.builtin.systemd:
+    name: roclink-ap-firewall
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply a changed firewall now
+  ansible.builtin.meta: flush_handlers
+
+- name: Stop the Wi-Fi client from reconnecting
+  ansible.builtin.shell: |
+    for c in $(nmcli -t -f NAME,TYPE con show | awk -F: '$2=="802-11-wireless" && $1!="{{ node_ap_conn }}" {print $1}'); do
+      if [ "$(nmcli -g connection.autoconnect con show "$c")" = "yes" ]; then
+        nmcli con mod "$c" connection.autoconnect no && echo "disabled $c"
+      fi
+    done
+  register: client_off
+  changed_when: "'disabled' in client_off.stdout"
+
+- name: The access point connection
+  community.general.nmcli:
+    conn_name: "{{ node_ap_conn }}"
+    type: wifi
+    ifname: "{{ node_ap_iface }}"
+    ssid: "{{ node_ap_ssid }}"
+    wifi:
+      mode: ap
+      band: bg
+      channel: "{{ node_ap_channel }}"
+    wifi_sec:
+      key-mgmt: wpa-psk
+      psk: "{{ node_ap_psk }}"
+      proto: [rsn]
+      pairwise: [ccmp]
+      group: [ccmp]
+      pmf: 1  # disable: the Pi's brcmfmac can't do protected management frames as an AP ("key setting validation failed")
+    method4: shared
+    ip4: ["{{ node_ap_address }}"]
+    method6: disabled
+    autoconnect: true
+    state: present
+  register: ap_conn
+  no_log: true
+
+- name: Is the AP active?
+  ansible.builtin.command: nmcli -t -g GENERAL.STATE con show {{ node_ap_conn }}
+  register: ap_state
+  changed_when: false
+  failed_when: false
+
+- name: Bring the AP up (this takes the Wi-Fi client down)
+  ansible.builtin.command: nmcli con up {{ node_ap_conn }}
+  when: ap_conn is changed or 'activated' not in ap_state.stdout
+  changed_when: true
+
+- name: Check the AP and its address
+  ansible.builtin.shell: |
+    set -e
+    /usr/sbin/iw dev {{ node_ap_iface }} info | grep -q "type AP"
+    ip -4 -br addr show {{ node_ap_iface }} | grep -q "{{ node_ap_address }}"
+  changed_when: false

@@ -23,6 +23,7 @@ A roclink gateway for a Raspberry Pi with an SX1302 LoRa concentrator HAT, which
 | `roles/mosquitto` | The broker: no anonymous access, a password per user, roclink's ACL |
 | `roles/sx1302` | Semtech's HAL and packet forwarder: built from source, patched for boards without a temperature sensor, a one-channel config, a `pinctrl` reset script |
 | `roles/roclink_gw` | Builds, configures and runs `roclink-gw` |
+| `roles/node_ap` | The Pi's Wi-Fi as the `roclink-nodes` access point for Wi-Fi nodes (`10.42.0.1`), firewalled so nodes reach only `roclink-gw`; the Pi's own link is Ethernet |
 | `tools/test_node.py` | A test node over UDP: sends a frame, checks the gateway's sealed ACK, receives and ACKs any downlink |
 
 ## Setting up a gateway
@@ -48,8 +49,8 @@ ansible-playbook site.yml --tags gw    # rebuild and restart just the daemon
 **[docs/OPERATIONS.md](docs/OPERATIONS.md)** covers watching MQTT and the logs, sending test traffic, and troubleshooting.
 
 ```bash
-python3 tools/test_node.py --gateway 192.168.8.110          # secured, net 0x42
-python3 tools/test_node.py --gateway 192.168.8.110 --open   # unsecured, net 0xF0
+python3 tools/test_node.py --gateway 192.168.8.237          # secured, net 0x42
+python3 tools/test_node.py --gateway 192.168.8.237 --open   # unsecured, net 0xF0
 
 # on the Pi
 journalctl -u roclink-gw -u lora_pkt_fwd -f

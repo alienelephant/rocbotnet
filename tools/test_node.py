@@ -6,8 +6,8 @@ secured net the frame is sealed (level enc) with the node's key derived from
 the master (the demo key by default), and the gateway's ACK must verify,
 bound to this frame's counter (PROTOCOL.md 10.6).
 
-    python3 tools/test_node.py --gateway 192.168.8.110            # net 0x42, secured
-    python3 tools/test_node.py --gateway 192.168.8.110 --open     # net 0xF0, unsecured
+    python3 tools/test_node.py --gateway 192.168.8.237            # net 0x42, secured
+    python3 tools/test_node.py --gateway 192.168.8.237 --open     # net 0xF0, unsecured
 
 The frame counter is kept in ~/.roclink-test-node-<net>-<node> so each run
 sends a new one, as a real node must. Uses roclink-rfc's reference sealing

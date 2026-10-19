@@ -10,3 +10,4 @@
     - { role: mosquitto, tags: [mqtt] }
     - { role: sx1302, tags: [lora] }
     - { role: roclink_gw, tags: [gw] }
+    - { role: node_ap, tags: [ap] }

@@ -1,6 +1,8 @@
 # Operating the gateway
 
-How to watch a running gateway, test it, and find out what's wrong. The examples use the first gateway, `rfgateyway1` at `192.168.8.110`, gateway id `0xFF01`.
+How to watch a running gateway, test it, and find out what's wrong. The examples use the first gateway, `rfgateyway1` at `192.168.8.237`, gateway id `0xFF01`.
+
+The Pi is on the LAN by Ethernet at `192.168.8.237`, and runs the `roclink-nodes` Wi-Fi access point for nodes, where it is `10.42.0.1`. Wi-Fi nodes send to `10.42.0.1:3333`. From the LAN, only the MQTT broker and SSH are meant to be used; `test_node.py` works from either side.
 
 ## Passwords
 
@@ -10,6 +12,8 @@ Every MQTT client logs in. The passwords are in the ansible vault, on the machin
 cd ~/Documents/code/ai_slop/roclink-gateway
 ansible-vault view group_vars/all/vault.yml
 ```
+
+The node access point's passphrase is there too, as `vault_node_ap_psk` (SSID `roclink-nodes`).
 
 | User | Can |
 |---|---|
@@ -31,7 +35,7 @@ mosquitto_sub -h localhost -u admin -P 'PASSWORD' -t 'roclink/#' -v
 - Keep the password on one line inside the quotes. A line break inside them becomes part of the password, and the broker refuses the login.
 - Messages aren't retained: you see only what's published while you're subscribed.
 
-From another machine on the LAN, use the same command with `-h 192.168.8.110`. It needs the mosquitto clients: `sudo pacman -S mosquitto` on Arch, `sudo apt install mosquitto-clients` on Debian. For a GUI, MQTT Explorer can connect to `192.168.8.110:1883` as `admin`.
+From another machine on the LAN, use the same command with `-h 192.168.8.237`. It needs the mosquitto clients: `sudo pacman -S mosquitto` on Arch, `sudo apt install mosquitto-clients` on Debian. For a GUI, MQTT Explorer can connect to `192.168.8.237:1883` as `admin`.
 
 To pretty-print the JSON (`sudo apt install jq` first):
 
@@ -92,8 +96,8 @@ sudo systemctl restart roclink-gw
 
 ```bash
 cd ~/Documents/code/ai_slop/roclink-gateway
-/usr/bin/python3 tools/test_node.py --gateway 192.168.8.110          # secured, net 0x42
-/usr/bin/python3 tools/test_node.py --gateway 192.168.8.110 --open   # unsecured, net 0xF0
+/usr/bin/python3 tools/test_node.py --gateway 192.168.8.237          # secured, net 0x42
+/usr/bin/python3 tools/test_node.py --gateway 192.168.8.237 --open   # unsecured, net 0xF0
 ```
 
 It uses node address `7E57` by default (`--node HEX` to change it), and keeps its frame counter in `~/.roclink-test-node-<net>-<node>`.

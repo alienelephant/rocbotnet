@@ -1,0 +1,7 @@
+node_ap_iface: wlan0              # the Pi's built-in radio, now the AP
+node_ap_uplink: eth0              # the Pi's own LAN link
+node_ap_conn: roclink-nodes       # NetworkManager connection name
+node_ap_ssid: roclink-nodes
+node_ap_psk: "{{ vault_node_ap_psk }}"
+node_ap_channel: 1                # 2.4 GHz only on a Pi 3; away from the LAN AP's channel 6
+node_ap_address: 10.42.0.1/24     # the gateway's address for nodes; DHCP hands out the rest
