@@ -56,7 +56,7 @@ Option C is in place: the Pi is on the LAN by Ethernet at `192.168.8.237`, and i
 
 | Part | Where it comes from | New? |
 |---|---|---|
-| roclink hub | `roclink_/hub` (the demo hub) | New role in roclink-gateway: `hub`, with routes for device type `rfidprox`: schemas 1–31 to `rfidauth`, 32–255 to `demoapp` |
+| roclink hub | the `roclink-hub` repository (the demo hub, moved out of `roclink_`) | New role in roclink-gateway: `hub`, with routes for device type `rfidprox`: schemas 1–31 to `rfidauth`, 32–255 to `demoapp` |
 | rfidauth | `rfidprox/backend/rfidauth` | New: Python, as BACKEND.md §5, with the stub authenticator and `fobs.toml` |
 | demoapp | `rfidprox/backend/demoapp` | New: a minimal app for the example. It authorizes anyone with a valid fob (`busy` if the box has a session), echoes box data back on schema + 1, and shows sessions on a web page. scavhunt replaces it once GAME.md 0.3 is done. |
 | MQTT users and ACL | roclink-gateway `mosquitto` role | Add `rfidauth`, `demoapp`, and the `roclink/authz/#` rules |
@@ -71,7 +71,7 @@ A PlatformIO project in `rfidprox/firmware`, Arduino-ESP32 3.x, for the Heltec V
 | `link` | the roclink node: seal, open, frame counter and chain key in NVS, daily ratchet, `PING` heartbeat, retries | roclink-rfc `src/` |
 | `session` | the state machine (DESIGN.md §6.1), the gate, grace buffer, renewals, rate budget | |
 | `boxlink` | framing (COBS, CRC-16), ACKs and retries, control operations | BOXLINK.md |
-| `reader` | RC522 polling, UID and card type, debouncing repeated taps | an MFRC522 library (to choose: miguelbalboa/MFRC522 or MFRC522v2) |
+| `reader` | RC522 polling, UID and card type, debouncing repeated taps | MFRC522v2 (the maintained library) |
 | `ui` | OLED messages, buzzer, LED | U8g2 |
 | `config` | Wi-Fi credentials, gateway address, node address and key | `secrets.h` (git-ignored) from `provision.py`, demo keys otherwise |
 
@@ -106,10 +106,13 @@ Steps 1–2 and 4 don't need the board; 3 needs only the Heltec; 5 adds the RC52
 | Repository | Adds |
 |---|---|
 | `rfidprox` | `firmware/`, `backend/rfidauth/`, `backend/demoapp/`, `tools/boxsim.py`, tests for the backend and for boxlink framing (host-side C tests, as in roclink-rfc) |
-| `roclink-gateway` | roles `node_ap` and `hub`; MQTT users and ACL; deploying rfidauth and demoapp |
+| `roclink-gateway` | role `hub` (installing from `roclink-hub`); MQTT users and ACL; deploying rfidauth and demoapp. (`node_ap` is done.) |
 | `roclink-rfc` | node-side `PING` |
 
-## 8. Decisions needed before starting
+## 8. Decisions
 
-1. **The MFRC522 library.** Both are Arduino-ESP32-compatible; MFRC522v2 is the maintained one.
-2. **Where the hub is deployed from.** It's the demo hub in `roclink_`, which stays as is: the role would copy it from there.
+| Decision | Choice |
+|---|---|
+| Access point | Option C: Ethernet for the Pi, its Wi-Fi as the AP (§2.1). Set up. |
+| RC522 library | MFRC522v2, the maintained one |
+| Where the hub comes from | A new `roclink-hub` repository, copied from `roclink_/hub`; `roclink_` is left as it is |
