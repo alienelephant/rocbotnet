@@ -168,26 +168,63 @@ static bool reader_was_reset() {
 
 static uint32_t dbg_resets;
 
-// Initialise, maximum gain, antenna on; then check the settings held.
-static bool reader_configure() {
+// Antenna drive levels, strongest first. A module whose supply can't take the
+// antenna's full current resets the moment it turns on; a weaker drive draws
+// less, at the cost of range. GsN/CWGsP/ModGsP are the driver conductances
+// (power-on values 0x88/0x20/0x20); TX is which antenna pins drive (0x03 both,
+// 0x01 TX1 only).
+struct Drive {
+    const char *name;
+    uint8_t tx, gsn, cwgsp, modgsp;
+};
+static const Drive DRIVES[] = {
+    {"both antenna pins, full drive", 0x03, 0x88, 0x20, 0x20},
+    {"both antenna pins, reduced drive", 0x03, 0x44, 0x10, 0x10},
+    {"TX1 only, full drive", 0x01, 0x88, 0x20, 0x20},
+    {"TX1 only, reduced drive", 0x01, 0x44, 0x10, 0x10},
+    {"TX1 only, minimum drive", 0x01, 0x22, 0x04, 0x04},
+};
+static constexpr size_t N_DRIVES = sizeof(DRIVES) / sizeof(DRIVES[0]);
+static size_t drive = 0;  // the level in use
+
+static bool try_drive(const Drive &d) {
+    using R = MFRC522Constants::PCD_Register;
     rfid.PCD_Init();
+    rfid.PCD_AntennaOff();
     rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);  // 48 dB: the best range
-    rfid.PCD_AntennaOn();
+    rfid_driver.PCD_WriteRegister(R::GsNReg, d.gsn);
+    rfid_driver.PCD_WriteRegister(R::CWGsPReg, d.cwgsp);
+    rfid_driver.PCD_WriteRegister(R::ModGsPReg, d.modgsp);
+    uint8_t tx = reg(R::TxControlReg);
+    rfid_driver.PCD_WriteRegister(R::TxControlReg, (uint8_t)((tx & ~0x03) | d.tx));
     delay(50);  // a supply that sags under the antenna's load resets the chip within this
-    uint8_t tx = reg(MFRC522Constants::TxControlReg);
-    bool held = (tx & 0x03) == 0x03 && rfid.PCD_GetAntennaGain() == MFRC522Constants::RxGain_max;
-    Serial.printf("[rc522] antenna %s (TxControlReg 0x%02X), receiver gain 0x%02X (max 0x70)%s\n",
-                  (tx & 0x03) == 0x03 ? "ON" : "OFF", tx, rfid.PCD_GetAntennaGain(),
-                  held ? "" : reader_was_reset() ? ": the chip RESET itself after the antenna turned on"
-                                                 : ": settings didn't hold");
-    if (!held && reader_was_reset()) {
+    tx = reg(R::TxControlReg);
+    return (tx & 0x03) == d.tx && rfid.PCD_GetAntennaGain() == MFRC522Constants::RxGain_max;
+}
+
+// Initialise and turn the antenna on at the strongest drive level that
+// doesn't reset the chip, starting from the level last in use.
+static bool reader_configure() {
+    for (size_t i = drive; i < N_DRIVES; ++i) {
+        if (try_drive(DRIVES[i])) {
+            if (i != drive || dbg_resets)
+                Serial.printf("[rc522] antenna ON at level %u: %s%s\n", (unsigned)i + 1, DRIVES[i].name,
+                              i ? " (shorter range: hold cards flat on the antenna)" : "");
+            else
+                Serial.printf("[rc522] antenna ON: %s, receiver gain max\n", DRIVES[i].name);
+            drive = i;
+            return true;
+        }
         dbg_resets++;
-        Serial.println("[rc522] VERDICT: its 3.3 V supply collapses under the antenna's load (50-100 mA), so "
-                       "the chip browns out and resets. Power it straight from J3-2/J3-3 and J3-1 with short "
-                       "wires (not through breadboard rails), add a 10-100 uF capacitor across the module's "
-                       "3.3V and GND pins, and measure 3.3 V there while it runs.");
+        Serial.printf("[rc522] level %u (%s): the chip RESET when the antenna turned on%s\n",
+                      (unsigned)i + 1, DRIVES[i].name, i + 1 < N_DRIVES ? "; trying a weaker drive" : "");
     }
-    return held;
+    Serial.println("[rc522] VERDICT: the chip resets even at the weakest antenna drive, so its supply can't "
+                   "run the antenna at all. Power it from J3-2/J3-3 and J3-1 with the shortest wires you "
+                   "have, or from another 3.3 V source with GND shared; else the module is faulty "
+                   "(its self-test fails too).");
+    drive = 0;  // next time, start from the top again
+    return false;
 }
 
 // Separates "resets when the antenna turns on" (its load sags the supply)
@@ -315,10 +352,10 @@ static void reader_report() {
                   (unsigned long)dbg_silent, (unsigned long)dbg_answers,
                   (unsigned long)dbg_select_fail, (unsigned long)dbg_other, v,
                   v != dbg_last_version ? " (CHANGED: loose wire?)" : "",
-                  (tx & 0x03) == 0x03 ? "on" : "OFF",
+                  (tx & 0x03) == DRIVES[drive].tx ? "on" : "OFF",
                   state == State::joining ? "joining Wi-Fi" : state == State::hello ? "waiting for HELLO ACK"
                   : state == State::idle ? "ready" : "waiting for GRANT");
-    if (reader_ok && (tx & 0x03) != 0x03) {
+    if (reader_ok && (tx & 0x03) != DRIVES[drive].tx) {
         Serial.printf("[rc522] the antenna is off again%s: initialising the chip again (%lu resets so far)\n",
                       reader_was_reset() ? " and its settings are back to power-on values (it RESET)" : "",
                       (unsigned long)++dbg_resets);
