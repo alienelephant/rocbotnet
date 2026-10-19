@@ -12,6 +12,7 @@ Built for the roclink scavenger hunt, where each puzzle box gets one proxy, but 
 | [docs/BOXLINK.md](docs/BOXLINK.md) | The UART protocol between a box and its proxy |
 | [docs/BACKEND.md](docs/BACKEND.md) | The roclink messages between the proxy and the backend, and the rfidauth service |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | Boards, wiring, power, bill of materials |
+| [docs/PLAN_WIFI_EXAMPLE.md](docs/PLAN_WIFI_EXAMPLE.md) | The plan for the first end-to-end example: Wi-Fi UDP through an access point on the gateway Pi |
 
 Related repositories: `roclink-rfc` (the protocol and library), `roclink-gateway` (the Pi gateway), `roclink-scavhunt` (the game).
 
