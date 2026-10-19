@@ -13,7 +13,18 @@ cd ~/Documents/code/ai_slop/roclink-gateway
 ansible-vault view group_vars/all/vault.yml
 ```
 
-The node access point's passphrase is there too, as `vault_node_ap_psk` (SSID `roclink-nodes`).
+The node access point's passphrase is there too, as `vault_node_ap_psk` (SSID `roclink-nodes`; a demo value, `roclink-demo`, for now).
+
+## The node access point
+
+```bash
+sudo hostapd_cli -i wlan0 all_sta      # who is connected
+cat /var/lib/misc/dnsmasq.leases       # who has which address
+journalctl -u hostapd -u dnsmasq -f    # joins, handshakes, leases
+sudo nft list table inet roclink_ap    # the firewall, with drop counters
+```
+
+A device that was refused before a password change keeps offering the old one: forget the network on it, then join again. Phones warn that the network has no internet; that's by design.
 
 | User | Can |
 |---|---|
