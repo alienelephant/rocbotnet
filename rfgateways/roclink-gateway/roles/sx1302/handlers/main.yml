@@ -1,0 +1,5 @@
+- name: Restart lora_pkt_fwd
+  ansible.builtin.systemd:
+    name: lora_pkt_fwd
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,13 @@
+# Sets up a roclink LoRa + Wi-Fi gateway with its MQTT broker:
+#
+#   ansible-playbook site.yml
+#   ansible-playbook site.yml --tags gw      # just rebuild and restart the daemon
+- name: roclink gateway
+  hosts: gateways
+  become: true
+  roles:
+    - { role: pi_base, tags: [base] }
+    - { role: mosquitto, tags: [mqtt] }
+    - { role: sx1302, tags: [lora] }
+    - { role: roclink_gw, tags: [gw] }
+    - { role: node_ap, tags: [ap] }

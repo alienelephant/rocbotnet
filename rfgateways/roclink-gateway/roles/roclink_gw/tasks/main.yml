@@ -1,0 +1,97 @@
+# roclink-gw: built on the gateway from this repo's gw/ and roclink's src/.
+- name: System user
+  ansible.builtin.user:
+    name: roclink-gw
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Build directory
+  ansible.builtin.file:
+    path: /opt/roclink-gw/{{ item }}
+    state: directory
+    mode: "0755"
+  loop: [gw, roclink]
+
+- name: Daemon source
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/gw/{{ item }}"
+    dest: /opt/roclink-gw/gw/{{ item }}
+    mode: "0644"
+  loop: [roclink_gw.c, Makefile]
+  register: gw_src
+
+- name: roclink library source
+  ansible.builtin.copy:
+    src: "{{ roclink_src }}/{{ item }}"
+    dest: /opt/roclink-gw/roclink/{{ item }}
+    mode: "0644"
+  loop: [roclink.h, roclink.c, roclink_secure.h, roclink_secure.c, roclink_aes.c]
+  register: lib_src
+
+- name: Is it installed?
+  ansible.builtin.stat:
+    path: /usr/local/bin/roclink-gw
+  register: gw_installed
+
+- name: Build and install
+  ansible.builtin.command:
+    cmd: make install ROCLINK_SRC=/opt/roclink-gw/roclink
+    chdir: /opt/roclink-gw/gw
+  when: gw_src is changed or lib_src is changed or not gw_installed.stat.exists
+  changed_when: true
+  notify: Restart roclink-gw
+
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/roclink-gw
+    state: directory
+    owner: root
+    group: roclink-gw
+    mode: "0750"
+
+- name: MQTT password
+  ansible.builtin.copy:
+    dest: /etc/roclink-gw/mqtt.pass
+    content: "{{ mqtt_users['roclink-gw'] }}\n"
+    owner: root
+    group: roclink-gw
+    mode: "0640"
+  no_log: true
+  notify: Restart roclink-gw
+
+- name: Network master keys
+  ansible.builtin.copy:
+    dest: /etc/roclink-gw/net-{{ '%02x' | format(item.id | int(base=16)) }}.key
+    content: "{{ item.master_key }}\n"
+    owner: root
+    group: roclink-gw
+    mode: "0640"
+  loop: "{{ roclink_nets | selectattr('mode', 'equalto', 'secured') | list }}"
+  loop_control:
+    label: "{{ item.id }}"
+  no_log: true
+  notify: Restart roclink-gw
+
+- name: Config
+  ansible.builtin.template:
+    src: gw.conf.j2
+    dest: /etc/roclink-gw/gw.conf
+    owner: root
+    group: roclink-gw
+    mode: "0640"
+  notify: Restart roclink-gw
+
+- name: Service
+  ansible.builtin.template:
+    src: roclink-gw.service.j2
+    dest: /etc/systemd/system/roclink-gw.service
+    mode: "0644"
+  notify: Restart roclink-gw
+
+- name: Enabled and running
+  ansible.builtin.systemd:
+    name: roclink-gw
+    enabled: true
+    state: started
+    daemon_reload: true

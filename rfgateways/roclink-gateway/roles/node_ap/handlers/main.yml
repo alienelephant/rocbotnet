@@ -1,0 +1,12 @@
+- name: Reload the node firewall
+  ansible.builtin.systemd:
+    name: roclink-ap-firewall
+    state: restarted
+    daemon_reload: true
+
+- name: Restart the AP
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: [roclink-ap-addr, hostapd, dnsmasq]

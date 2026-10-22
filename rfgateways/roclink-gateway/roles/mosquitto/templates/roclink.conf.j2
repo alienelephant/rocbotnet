@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+# The roclink broker: on the LAN, every client logs in, and the ACL says who
+# may read and write what (see roclink.acl).
+per_listener_settings false
+listener {{ mqtt_port }}
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+acl_file /etc/mosquitto/roclink.acl
+max_queued_messages 100000

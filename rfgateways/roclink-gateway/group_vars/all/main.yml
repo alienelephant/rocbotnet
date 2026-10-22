@@ -1,0 +1,43 @@
+# --- radio: must match the nodes (RadioLib defaults at 915 MHz in roclink's sketches)
+lora:
+  freq_hz: 915000000
+  sf: 9
+  bw_khz: 125
+  cr: 7               # coding rate 4/7
+  preamble: 8
+  power_dbm: 14       # 12..27 on the US915 HAT
+  reply_delay_ms: 150 # first reply this long after the uplink ends
+
+# --- roclink networks this gateway serves
+roclink_nets:
+  - id: "0x42"
+    mode: secured            # master mode, open admission, require-enc
+    master_key: "{{ vault_net_42_master }}"
+  - id: "0xF0"               # the open test net of the unsecured example sketches
+    mode: open
+
+roclink_udp_port: 3333       # Wi-Fi nodes (wifi_udp sketches); 0 turns it off
+roclink_policies: []         # e.g. ["allow_none = 42:1234", "deny = 42:1235"]
+
+# roclink's library, from the roclink-rfc repository (rocbotnet/protocol/)
+roclink_src: "{{ playbook_dir }}/../../protocol/roclink-rfc/src"
+
+# --- MQTT
+mqtt_port: 1883
+mqtt_users:                  # name -> password (in the vault)
+  roclink-gw: "{{ vault_mqtt_roclink_gw }}"
+  roclink-hub: "{{ vault_mqtt_roclink_hub }}"
+  roclink-ops: "{{ vault_mqtt_roclink_ops }}"
+  admin: "{{ vault_mqtt_admin }}"
+  scavhunt: "{{ vault_mqtt_scavhunt }}"   # the scavenger hunt service (roclink-scavhunt)
+
+# --- Semtech SX1302 HAL and packet forwarder
+sx1302_hal_version: V2.1.0
+sx1302_dir: /opt/sx1302
+sx1302_semtech_port: 1700
+# GPIOs (BCM numbers) of the SX1302 board. Found by probing this Waveshare
+# HAT: reset is GPIO17, not the CoreCell reference design's 23, and it has no
+# power-enable pin to drive. For a CoreCell-style board use
+# {reset: 23, power_en: 18, sx1261_reset: 22}.
+sx1302_pins:
+  reset: 17
