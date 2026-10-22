@@ -1,0 +1,46 @@
+#!/bin/zsh
+# The roclink hub and scavenger hunt on this Mac (rocbotnet/infra/roclink-bench).
+# setup.sh installs them, and links this script as ~/bin/roclink.
+#
+#   roclink start | stop | restart | status | logs
+#   roclink scavhunt <command>        the game's operator commands (scavhunt -h)
+#   roclink watch [topic]             everything on the Pi's broker (default roclink/#), as admin
+R=$HOME/roclink
+export SCAVHUNT_GAME=$R/etc/game.toml
+
+running() { [[ -f $R/run/$1.pid ]] && kill -0 $(<$R/run/$1.pid) 2>/dev/null }
+
+start_one() {  # name, command...
+    local name=$1; shift
+    if running $name; then echo "$name already running"; return; fi
+    # caffeinate -i keeps the Mac awake while the process runs (lid open)
+    nohup caffeinate -i "$@" >>$R/log/$name.log 2>&1 &
+    echo $! >$R/run/$name.pid
+    echo "$name started (pid $!), log $R/log/$name.log"
+}
+
+stop_one() {
+    local name=$1
+    if ! running $name; then echo "$name not running"; rm -f $R/run/$name.pid; return; fi
+    local pid=$(<$R/run/$name.pid)
+    pkill -TERM -P $pid; kill -TERM $pid 2>/dev/null
+    for i in {1..30}; do kill -0 $pid 2>/dev/null || break; sleep 1; done
+    rm -f $R/run/$name.pid
+    echo "$name stopped"
+}
+
+mkdir -p $R/run $R/log
+case $1 in
+    start)
+        start_one hub $R/venv/hub/bin/roclink-hub --config $R/etc/hub.toml
+        start_one scavhunt $R/venv/scavhunt/bin/scavhunt serve ;;
+    stop) stop_one scavhunt; stop_one hub ;;
+    restart) $0 stop; $0 start ;;
+    status)
+        for n in hub scavhunt; do running $n && echo "$n: running" || echo "$n: stopped"; done
+        $R/venv/scavhunt/bin/scavhunt status 2>&1 ;;
+    logs) tail -n 40 -f $R/log/hub.log $R/log/scavhunt.log ;;
+    watch) exec /usr/local/bin/mosquitto_sub -h 192.168.8.237 -u admin -P "$(<$R/etc/admin-mqtt-password)" -v -t "${2:-roclink/#}" ;;
+    scavhunt) shift; exec $R/venv/scavhunt/bin/scavhunt "$@" ;;
+    *) sed -n '2,7p' $0; exit 1 ;;
+esac

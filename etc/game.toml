@@ -1,0 +1,38 @@
+# The bench game: the real boxes only, the Heltec's (LoRa) and the XIAO's (Wi-Fi).
+# (tools/scavbox.py's simulated boxes, 0x0201 and up, are no longer in it.)
+[game]
+id = "bench-hunt"
+title = "Bench Hunt"
+time_limit_min = 120
+session_timeout_min = 10
+points = 100
+hint_penalty_s = [60, 120, 300]
+wrong_penalty_s = 30
+
+[[box]]
+id = "tower"
+name = "Tower (Heltec LoRa)"
+net = 0x42
+node = 0x0301
+points = 200
+
+[[box]]
+id = "workshop"
+name = "Workshop (XIAO)"
+net = 0x42
+node = 0x0302
+
+[service]
+name = "scavhunt"
+host = "192.168.8.237"
+port = 1883
+username = "scavhunt"
+password_file = "@ROCLINK_DIR@/etc/scavhunt-mqtt-password"
+db = "@ROCLINK_DIR@/data/game.db"
+verdict_ttl_s = 60
+allow_insecure = false
+
+[api]
+host = "0.0.0.0"
+port = 8090
+hub_api = "http://127.0.0.1:8080"   # box data on the scoreboard, from the hub
