@@ -48,6 +48,8 @@ def test_readers_read_while_the_writer_writes(tmp_path):
     latest = api.uplinks(reader, {"node": "0x1", "limit": "2"})
     assert [u["node_id"] for u in latest] == [1, 1]
     assert latest[0]["decoded"]["temp_c"] == 23.45
+    assert len(api.uplinks(reader, {"node": "0x1", "min_schema": "1", "limit": "2"})) == 2
+    assert api.uplinks(reader, {"node": "0x1", "min_schema": "2"}) == []  # all on schema 1
     series = api.readings(reader, {"node": "1", "metric": "temp_c", "limit": "5"})
     assert len(series) == 5 and series == sorted(series)
     assert api.health(reader, {})["schema"] == db.SCHEMA_VERSION

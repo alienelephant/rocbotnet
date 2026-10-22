@@ -14,6 +14,8 @@ A node that isn't registered is sleepy, and is decoded by the deployment-wide
 
 from dataclasses import dataclass, field
 
+from .decoders import DECODERS
+
 SLEEPY = "sleepy"
 ALWAYS_LISTENING = "always_listening"
 NODE_CLASSES = (SLEEPY, ALWAYS_LISTENING)
@@ -40,10 +42,16 @@ class NodeEntry:
 
 class Registry:
     def __init__(self, types: dict[str, DeviceType], nodes: list[NodeEntry],
-                 schemas: dict[int, str]):
+                 schemas: dict[int, str], layouts: dict | None = None):
         self.types = types
         self.nodes = nodes
         self.schemas = schemas  # the deployment-wide table, for unregistered nodes
+        self.layouts = layouts or {}  # decoders declared in the config, by name
+
+    def decode(self, name: str, payload: bytes) -> dict:
+        """Runs decoder `name`: one declared in the config, or a built-in."""
+        layout = self.layouts.get(name)
+        return layout(payload) if layout is not None else DECODERS[name](payload)
 
     def device_type(self, net_id: int, node_id: int) -> DeviceType | None:
         for entry in self.nodes:  # the first matching entry wins

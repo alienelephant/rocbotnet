@@ -217,7 +217,10 @@ def decode_payload(uplink: Uplink, decoders) -> None:
         return
     uplink.decoder = name
     try:
-        uplink.decoded = DECODERS[name](uplink.payload)
+        if hasattr(decoders, "decode"):
+            uplink.decoded = decoders.decode(name, uplink.payload)
+        else:
+            uplink.decoded = DECODERS[name](uplink.payload)
     except ValueError as e:
         uplink.decode_error = str(e)
 

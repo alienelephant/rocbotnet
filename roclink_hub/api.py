@@ -11,12 +11,13 @@ from hub.db.
 
     GET /api/health                          schema version, message counts
     GET /api/nodes                           every node, most recent first
-    GET /api/uplinks?node=&net=&schema=&limit=&before=
+    GET /api/uplinks?node=&net=&schema=&min_schema=&limit=&before=
     GET /api/readings?node=&metric=&net=&since=&limit=
     GET /api/rejections?severity=&reason=&net=&node=&since=&limit=
 
 Ids may be decimal or 0x-hex. `since` and `before` take unix ms and uplink
-ids respectively. For rejections, `severity` means "at least" (warn = warn,
+ids respectively. `min_schema` keeps schemas from that one up (a device's own
+messages, say, without its PINGs on schema 0). For rejections, `severity` means "at least" (warn = warn,
 high and critical) and `node` matches the claimed src.
 """
 
@@ -111,6 +112,9 @@ def uplinks(conn, params):
     if "before" in params:
         where.append("id < ?")
         args.append(_id(params, "before"))
+    if "min_schema" in params:
+        where.append("schema >= ?")
+        args.append(_id(params, "min_schema"))
     rows = conn.execute(
         "SELECT u.*, (SELECT COUNT(*) FROM receptions r WHERE r.uplink_id = u.id) AS receptions"
         f" FROM uplinks u {_where(where)} ORDER BY id DESC LIMIT ?",

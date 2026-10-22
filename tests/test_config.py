@@ -86,3 +86,55 @@ def test_device_types_nodes_and_downlink(tmp_path):
 def test_rejects(tmp_path, text, error):
     with pytest.raises(config.ConfigError, match=error):
         load(tmp_path, text)
+
+
+LAYOUT = """
+[decoder.vault-reading]
+struct = "<hfB"
+fields = ["temp_cC", "humidity", "flags"]
+scale = { temp_cC = 0.01 }
+bits = { flags = ["door_open", "", "lid_closed"] }
+
+[[device_type]]
+name = "scavhunt-box"
+class = "always_listening"
+schemas = { 32 = "vault-reading" }
+
+[[node]]
+net = 0x42
+nodes = ["0x0201"]
+type = "scavhunt-box"
+"""
+
+
+def test_a_decoder_declared_in_the_config(tmp_path):
+    import struct
+
+    from roclink_hub.record import parse_message
+
+    cfg = load(tmp_path, LAYOUT)
+    payload = struct.pack("<hfB", 2215, 48.5, 0b101)
+    frame = bytes([0x20, 0x00, 0x42]) + struct.pack("<HHBB", 0x0201, 0, 1, 32) + payload
+    up = parse_message("roclink/in/42/ff01/up", frame, 1000, cfg.registry).uplink
+    assert (up.device_type, up.decoder) == ("scavhunt-box", "vault-reading")
+    assert up.decoded == {"temp_cC": pytest.approx(22.15), "humidity": 48.5, "door_open": 1, "lid_closed": 1}
+    short = parse_message("roclink/in/42/ff01/up", frame[:-1], 1000, cfg.registry).uplink
+    assert short.decoded is None and "vault-reading payload is 7 bytes" in short.decode_error
+
+
+@pytest.mark.parametrize("table, error", [
+    ('struct = "hB"\nfields = ["a", "b"]', 'starting with "<" or ">"'),
+    ('struct = "<hB"\nfields = ["a"]', "has 2 fields"),
+    ('struct = "<hB"\nfields = ["a", "a"]', "has 2 fields"),
+    ('struct = "<hQq!"\nfields = ["a", "b", "c"]', "struct"),
+    ('struct = "<hB"\nfields = ["a", "b"]\nscale = { c = 2 }', "scale must be a table of field names"),
+    ('struct = "<hB"\nfields = ["a", "b"]\ncolour = 1', "unknown settings colour"),
+])
+def test_rejects_a_bad_declared_decoder(tmp_path, table, error):
+    with pytest.raises(config.ConfigError, match=error):
+        load(tmp_path, f"[decoder.bad]\n{table}\n")
+
+
+def test_rejects_an_undeclared_decoder_name(tmp_path):
+    with pytest.raises(config.ConfigError, match="unknown decoder 'nope'"):
+        load(tmp_path, '[schemas]\n32 = "nope"\n')

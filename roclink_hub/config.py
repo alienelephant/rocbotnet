@@ -6,7 +6,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from functools import cached_property
 
-from .decoders import DECODERS
+from .decoders import DECODERS, Layout, layout
 from .registry import NODE_CLASSES, DeviceType, NodeEntry, Registry
 
 
@@ -139,12 +139,13 @@ class Config:
     schemas: dict[int, str] = field(default_factory=dict)  # schema -> decoder, for unregistered nodes
     device_types: dict[str, DeviceType] = field(default_factory=dict)
     nodes: list[NodeEntry] = field(default_factory=list)
+    layouts: dict[str, Layout] = field(default_factory=dict)  # [decoder.<name>]: decoders declared here
     state_dir: str | None = None  # small state files; default: beside db_path
     log_level: str = "INFO"
 
     @cached_property
     def registry(self) -> Registry:
-        return Registry(self.device_types, self.nodes, self.schemas)
+        return Registry(self.device_types, self.nodes, self.schemas, self.layouts)
 
     def state_path(self, name: str) -> str:
         """Where a process keeps its own small state file (anti-replay windows, the downlink queue)."""
@@ -171,7 +172,9 @@ def load(path: str) -> Config:
     if unknown_db:
         raise ConfigError(f"unknown settings in [database]: {', '.join(sorted(unknown_db))}")
     public = _public(raw.pop("public", {}))
-    types = _device_types(raw.pop("device_type", []))
+    layouts = _layouts(raw.pop("decoder", {}))
+    decoders = set(DECODERS) | set(layouts)
+    types = _device_types(raw.pop("device_type", []), decoders)
     cfg = Config(
         db_path=database["path"],
         state_dir=database.get("state_dir"),
@@ -183,9 +186,10 @@ def load(path: str) -> Config:
         downlink=_section(DownlinkConfig, raw.pop("downlink", {}), "downlink"),
         routes=[_route(r, public, types) for r in raw.pop("route", [])],
         public=public,
-        schemas=_ports(raw.pop("schemas", {}), "[schemas]"),
+        schemas=_ports(raw.pop("schemas", {}), "[schemas]", decoders),
         device_types=types,
         nodes=[_node_entry(n, types) for n in raw.pop("node", [])],
+        layouts=layouts,
         log_level=raw.pop("log_level", "INFO"),
     )
     if raw:
@@ -255,7 +259,25 @@ def _route(values: dict, public: PublicConfig, types: dict[str, DeviceType]) -> 
     return Route(service, net, schemas, nodes, allow_insecure, route_types)
 
 
-def _device_types(entries: list) -> dict[str, DeviceType]:
+def _layouts(tables: dict) -> dict[str, Layout]:
+    """[decoder.<name>] struct = "<hB", fields = [...], scale = {...}, bits = {...}"""
+    if not isinstance(tables, dict):
+        raise ConfigError("[decoder.<name>] must be tables")
+    layouts = {}
+    for name, values in tables.items():
+        where = f"[decoder.{name}]"
+        if not TYPE_NAME.fullmatch(name):
+            raise ConfigError(f"{where}: name must match {TYPE_NAME.pattern}")
+        if name in DECODERS:
+            raise ConfigError(f"{where}: {name} is a built-in decoder")
+        try:
+            layouts[name] = layout(name, values if isinstance(values, dict) else {})
+        except ValueError as e:
+            raise ConfigError(f"{where}: {e}") from None
+    return layouts
+
+
+def _device_types(entries: list, decoders: set[str]) -> dict[str, DeviceType]:
     """[[device_type]] name = "...", class = "sleepy" | "always_listening", schemas = {1 = "env"}"""
     types = {}
     for values in entries:
@@ -271,7 +293,7 @@ def _device_types(entries: list) -> dict[str, DeviceType]:
         node_class = values.get("class", "sleepy")
         if node_class not in NODE_CLASSES:
             raise ConfigError(f"{where}: class must be one of {', '.join(NODE_CLASSES)}")
-        types[name] = DeviceType(name, node_class, _ports(values.get("schemas", {}), where))
+        types[name] = DeviceType(name, node_class, _ports(values.get("schemas", {}), where, decoders))
     return types
 
 
@@ -312,7 +334,7 @@ def _check_net(value, where: str) -> int:
     return value
 
 
-def _ports(values: dict, where: str) -> dict[int, str]:
+def _ports(values: dict, where: str, decoders: set[str]) -> dict[int, str]:
     if not isinstance(values, dict):
         raise ConfigError(f"{where}: schemas must be a table of schema = decoder")
     schemas = {}
@@ -323,9 +345,9 @@ def _ports(values: dict, where: str) -> dict[int, str]:
             raise ConfigError(f"{where}: schema {key!r} is not a number") from None
         if not 1 <= schema <= 255:
             raise ConfigError(f"{where}: schema {schema} is outside 1..255")
-        if decoder not in DECODERS:
+        if decoder not in decoders:
             raise ConfigError(
-                f"{where}: schema {schema}: unknown decoder {decoder!r} (have: {', '.join(DECODERS)})"
+                f"{where}: schema {schema}: unknown decoder {decoder!r} (have: {', '.join(sorted(decoders))})"
             )
         schemas[schema] = decoder
     return schemas

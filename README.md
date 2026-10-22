@@ -215,7 +215,17 @@ type = "room-sensor"
 
 The decoders here: `env` (int16 temp_cC, uint16 rh_cPct, uint16 batt_mV → temp_c, rh_pct, batt_v), `event` (uint8 event, uint32 count) and `text` (UTF-8). Delivered records carry the node's `device_type`, and a `[[route]]` can match on `types`.
 
-To add a format, write a function in `roclink_hub/decoders.py` that takes `bytes`, returns a flat `dict`, and raises `ValueError` on bad input. Then add it to `DECODERS`. Every number in the returned dict also becomes a `readings` row. A payload that fails to decode is still stored and delivered, with `decode_error` set.
+A fixed binary layout needs no code: declare it in the config and name it in a device type's schemas.
+
+```toml
+[decoder.vault-reading]
+struct = "<hfB"                                     # Python struct format, explicit byte order
+fields = ["temp_c", "humidity", "flags"]
+scale = { temp_c = 0.01 }                           # optional: multiply a field
+bits = { flags = ["door_open", "", "lid_closed"] }  # optional: one-bit fields, lowest first
+```
+
+For anything else, write a function in `roclink_hub/decoders.py` that takes `bytes`, returns a flat `dict`, and raises `ValueError` on bad input. Then add it to `DECODERS`. Every number in the returned dict also becomes a `readings` row. A payload that fails to decode is still stored and delivered, with `decode_error` set.
 
 ## Reading a database from another process
 

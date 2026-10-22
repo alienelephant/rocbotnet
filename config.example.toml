@@ -105,7 +105,19 @@ schemas = { 1 = "env", 2 = "event" }
 [[device_type]]
 name = "boiler-valve"
 class = "always_listening"
-schemas = { 1 = "text" }
+schemas = { 1 = "text", 32 = "vault-reading" }
+
+# Decoders declared here rather than written in Python: a device's message as
+# a fixed binary layout. `struct` is a Python struct format with an explicit
+# byte order ("<" little-endian, as on ESP32, AVR and ARM), one name per field.
+# `scale` multiplies a field; `bits` splits an integer into one-bit fields,
+# lowest bit first ("" skips a bit). Name it in a device type's schemas.
+# (An example; none by default.)
+[decoder.vault-reading]
+struct = "<hfB"                       # int16, float32, uint8: 7 bytes
+fields = ["temp_c", "humidity", "flags"]
+scale = { temp_c = 0.01 }             # sent in centidegrees
+bits = { flags = ["door_open", "", "lid_closed"] }
 
 # Which nodes are which device type. The first matching entry wins.
 [[node]]
