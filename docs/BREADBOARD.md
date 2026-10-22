@@ -89,7 +89,7 @@ Every signal is 3.3 V. **Power the RC522 from 3V3 (J3-2 or J3-3), never from 5V.
 
 ## 3. Build and flash
 
-The firmware is in `firmware/` (PlatformIO). It needs `roclink-rfc` next to this repository. Pick the environment for your board:
+The firmware is in `firmware/` (PlatformIO). It needs `roclink-rfc` at `../../protocol/roclink-rfc` (the rocbotnet layout). Pick the environment for your board:
 
 ```bash
 cd ~/Documents/code/ai_slop/rfidprox/firmware
