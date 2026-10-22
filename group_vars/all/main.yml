@@ -29,6 +29,7 @@ mqtt_users:                  # name -> password (in the vault)
   roclink-hub: "{{ vault_mqtt_roclink_hub }}"
   roclink-ops: "{{ vault_mqtt_roclink_ops }}"
   admin: "{{ vault_mqtt_admin }}"
+  scavhunt: "{{ vault_mqtt_scavhunt }}"   # the scavenger hunt service (roclink-scavhunt)
 
 # --- Semtech SX1302 HAL and packet forwarder
 sx1302_hal_version: V2.1.0
