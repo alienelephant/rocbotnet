@@ -1,0 +1,72 @@
+# An example game: five boxes, with the prerequisites from docs/GAME.md §5.
+# Copy to game.toml and change the addresses to your boxes'.
+
+[game]
+id = "makerspace-hunt"
+title = "The Makerspace Hunt"
+time_limit_min = 90          # omit for no time limit
+session_timeout_min = 20     # a team that goes quiet at a box is charged this much
+
+# Scoring (docs/GAME.md §3). These are defaults; any [[box]] can set its own.
+points = 100                 # each box solved
+hint_penalty_s = [60, 120, 300]   # hint 1, 2, 3: each at least as dear as the one before
+wrong_penalty_s = 30         # each wrong answer
+
+# One [[box]] per puzzle. `net` and `node` are the box's roclink address;
+# the hub must route it to this service (README). `requires` lists boxes a
+# team must solve first. Boxes are required unless `required = false`.
+[[box]]
+id = "vault"
+name = "Vault"
+net = 0x42
+node = 0x0201
+
+[[box]]
+id = "lab"
+name = "Lab"
+net = 0x42
+node = 0x0202
+requires = ["vault"]
+
+[[box]]
+id = "garden"
+name = "Garden"
+net = 0x42
+node = 0x0203
+
+[[box]]
+id = "tower"
+name = "Tower"
+net = 0x42
+node = 0x0204
+requires = ["lab", "garden"]
+points = 200                 # the finale
+hint_penalty_s = [120, 300]
+
+[[box]]
+id = "cellar"
+name = "Cellar"
+net = 0x42
+node = 0x0205
+required = false             # optional: worth points, not needed to finish
+points = 50
+hint_penalty_s = []          # no hints
+
+[service]
+name = "scavhunt"            # the hub's [[route]] service, and the broker username
+host = "localhost"
+port = 1883
+# username = "scavhunt"
+# password_file = "/etc/scavhunt/mqtt-password"
+# tls = true
+# ca_file = "/etc/ssl/certs/ca.pem"
+db = "game.db"
+verdict_ttl_s = 60
+allow_insecure = false       # true accepts unsecured WINs: bench testing only
+
+[api]
+host = "127.0.0.1"
+port = 8090
+# The hub's read-only API: the scoreboard shows each box's latest own data
+# (sensor readings) from it. Omit to leave that out.
+# hub_api = "http://127.0.0.1:8080"

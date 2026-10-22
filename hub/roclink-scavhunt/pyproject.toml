@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roclink-scavhunt"
+version = "0.1.0"
+description = "An IoT scavenger hunt: a roclink hub service"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["paho-mqtt>=2.0,<3"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+scavhunt = "scavhunt.__main__:main"
+
+[tool.setuptools]
+packages = ["scavhunt"]
+
+[tool.setuptools.package-data]
+scavhunt = ["scoreboard.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
