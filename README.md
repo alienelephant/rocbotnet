@@ -68,6 +68,6 @@ It goes out in the node's next reply window, and `roclink/in/42/ff01/down_status
 
 ## Not done yet
 
-- LoRa downlink and reply timing haven't been checked on air yet. LoRa uplink works: a Heltec running `lora_secure_sender` is received.
+- LoRa works both ways on air with a Heltec V3 (rfidprox `heltec_v3_gamebox_lora`, RadioLib SX1262 at the settings above): uplink, the sealed ACK in the reply window, and "now" downlink to an always-listening node, which ACKs it. Not yet tried: sleepy LoRa nodes' reply-window downlink, and range.
 - Enrolled mode (per-node keys instead of the master on the gateway).
 - A gateway status or heartbeat topic (GATEWAY_INTERFACE.md open question 4).

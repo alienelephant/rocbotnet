@@ -87,6 +87,12 @@ static uint32_t mono_ms(void) {
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
 
+static int64_t mono_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
 static int64_t wall_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -535,6 +541,29 @@ static uint32_t lora_airtime_us(size_t len) {
     return (uint32_t)(t * 1e6);
 }
 
+/* The concentrator's clock against ours: the tmst of the last uplink, and our
+ * mono_us() when it arrived (0: no uplink yet). Its counter is 32-bit µs, so a
+ * reference is good for a while: unsigned differences survive one wrap. */
+static uint32_t g_tmst_ref;
+static int64_t g_tmst_ref_us;
+#define TMST_REF_MAX_US (10LL * 60 * 1000000) /* older than this: don't extrapolate */
+
+/* Our mono_us() by which the radio will have sent everything handed to it. */
+static int64_t g_lora_busy_us;
+
+static void tmst_heard(uint32_t tmst) {
+    g_tmst_ref = tmst;
+    g_tmst_ref_us = mono_us();
+}
+
+/* The concentrator's time now, if a recent uplink tells us. */
+static bool tmst_now(uint32_t *t) {
+    int64_t age = mono_us() - g_tmst_ref_us;
+    if (!g_tmst_ref_us || age > TMST_REF_MAX_US) return false;
+    *t = g_tmst_ref + (uint32_t)age;
+    return true;
+}
+
 /* Sends one frame over LoRa through the packet forwarder: at concentrator
  * time `tmst` if `timed`, else at once. */
 static void lora_send(const uint8_t *frame, size_t len, bool timed, uint32_t tmst) {
@@ -582,6 +611,28 @@ static void lora_send(const uint8_t *frame, size_t len, bool timed, uint32_t tms
     free(body);
 }
 
+/* lora_send(), keeping the radio's schedule: the concentrator sends one frame
+ * at a time and refuses an immediate one while it's still sending (a reply's
+ * ACK, say, when a "now" downlink comes from the hub straight after). Such a
+ * frame is timed to follow the one in progress instead. */
+static void lora_tx(const uint8_t *frame, size_t len, bool timed, uint32_t at) {
+    const int64_t now = mono_us();
+    uint32_t tnow;
+    const bool clock = tmst_now(&tnow);
+    int64_t start = now;
+    if (timed && clock) {
+        start = now + (int32_t)(at - tnow);
+    } else if (!timed && clock && now < g_lora_busy_us + REPLY_GAP_MS * 1000) {
+        start = g_lora_busy_us + REPLY_GAP_MS * 1000;
+        timed = true;
+        at = tnow + (uint32_t)(start - now);
+        LOG_DEBUG("lora: radio busy for %lld ms more, sending after it", (long long)((g_lora_busy_us - now) / 1000));
+    }
+    lora_send(frame, len, timed, at);
+    const int64_t end = start + lora_airtime_us(len);
+    if (end > g_lora_busy_us) g_lora_busy_us = end;
+}
+
 /* A burst of frames to one node over its link: replies to an uplink, or "now" downlink. */
 typedef struct {
     uint8_t frame[ROCLINK_FRAME_MAX_LEN + 32];
@@ -601,7 +652,7 @@ static void send_burst(const link_t *link, out_frame_t *f, int count, bool reply
             sendto(g_udp_fd, f[i].frame, (size_t)f[i].len, 0, (const struct sockaddr *)&link->udp,
                    sizeof(link->udp));
         } else if (link->kind == LINK_LORA) {
-            lora_send(f[i].frame, (size_t)f[i].len, timed, at);
+            lora_tx(f[i].frame, (size_t)f[i].len, timed, at);
             at += lora_airtime_us((size_t)f[i].len) + REPLY_GAP_MS * 1000u;
             if (!timed && i + 1 < count) usleep(lora_airtime_us((size_t)f[i].len) + REPLY_GAP_MS * 1000u);
         }
@@ -976,7 +1027,11 @@ static void semtech_rx(void) {
         int n = b64_decode(data->valuestring, frame, sizeof(frame));
         if (n <= 0) continue;
         link_t link = {.kind = LINK_LORA};
-        if (cJSON_IsNumber(tmst)) { link.tmst = (uint32_t)tmst->valuedouble; link.tmst_valid = true; }
+        if (cJSON_IsNumber(tmst)) {
+            link.tmst = (uint32_t)tmst->valuedouble;
+            link.tmst_valid = true;
+            tmst_heard(link.tmst);
+        }
         if (cJSON_IsNumber(rssi)) { link.rssi = (float)rssi->valuedouble; link.have_radio = true; }
         if (cJSON_IsNumber(lsnr)) link.snr = (float)lsnr->valuedouble;
         handle_frame(frame, (size_t)n, &link);
