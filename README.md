@@ -68,6 +68,21 @@ Give the service a broker user named `scavhunt` that can read `roclink/svc/scavh
 
 Boxes must send at security level `enc` (GAME.md rule 1). For a bench test with unsecured boxes, set `allow_insecure = true` under `[service]`.
 
+## Simulated boxes
+
+`tools/scavbox.py` plays boxes as secured roclink nodes over UDP, through a real gateway, hub and this service. It needs `cryptography` and `../roclink-rfc`:
+
+```bash
+.venv/bin/pip install cryptography
+.venv/bin/python tools/scavbox.py --gateway 192.168.8.237 --box vault=0201 --box garden=0202
+> vault start text:RED
+[vault] VERDICT go: 0 hints taken (solved 0 of 3 required)
+> vault win
+[vault] VERDICT accepted (solved 1 of 3 required)
+```
+
+Commands can be piped in too: each one waits for its verdict. Use node addresses that no real box uses, or the gateway refuses the simulator's frame counters as replays.
+
 ## Tests
 
 ```bash

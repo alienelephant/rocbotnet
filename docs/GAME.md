@@ -236,6 +236,8 @@ A box that resends a request because its verdict was lost gets the same answer a
 
 **Downlink, schema 11: `CONTROL`** (operator). Byte 0 is the version, byte 1 the command: 1 reset the puzzle, 2 disable the box, 3 enable it.
 
+**Schemas 32–255: the box's own data** (not the game's). Whatever a box's builder chooses to send, such as sensor readings, in a layout the hub's config declares. The game ignores them, and the hub's route to the game lists only the game's schemas (1–5, and 10 and 11, since a route also limits the downlink the game may send), so they are only stored. rfidprox forwards them from the box unchanged (its BOXLINK.md).
+
 ## 7. Cheating, and what stops it
 
 | Attack | Stopped by |
