@@ -37,12 +37,12 @@ TX goes to RX each way. Both boards are 3.3 V and each is powered by its own USB
 ## Flashing
 
 ```bash
-# the box (this repository; rfidprox must be next to it, for the BoxLink library).
+# the box (this repository; rfidprox must be at ../../rfidproxies/rfidprox, for the BoxLink library).
 # Use the DevKit's port marked UART: the box's log is on it.
 pio run -t upload && pio device monitor
 
 # the proxy
-cd ../rfidprox/firmware
+cd ../../rfidproxies/rfidprox/firmware
 pio run -e heltec_v3_gamebox_lora -t upload && pio device monitor -e heltec_v3_gamebox_lora
 ```
 
