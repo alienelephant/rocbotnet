@@ -5,37 +5,238 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scoreboard</title>
 <style>
-  :root { --bg: #111418; --fg: #e8e6e1; --dim: #8a8f98; --line: #2a2f36; --ok: #5cc28a; --open: #e0b44c; }
+  :root { --bg: #111418; --panel: #181c22; --fg: #e8e6e1; --dim: #8a8f98; --line: #2a2f36;
+          --ok: #5cc28a; --open: #e0b44c; --bad: #e0705c; --info: #7aa7e0; }
+  * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
          font: 16px/1.4 system-ui, sans-serif; }
   h1 { margin: 0 0 4px; font-size: 1.6rem; }
-  .meta { color: var(--dim); margin-bottom: 16px; }
+  h2 { margin: 24px 0 8px; font-size: .85rem; font-weight: 600; color: var(--dim);
+       text-transform: uppercase; letter-spacing: .06em; }
+  .meta { color: var(--dim); }
+  .clock { font-variant-numeric: tabular-nums; font-size: 1.3rem; color: var(--fg); margin-left: 8px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 24px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
   table { border-collapse: collapse; width: 100%; }
-  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
   th { color: var(--dim); font-weight: 500; font-size: .85rem; }
   td.rank { width: 2.5em; color: var(--dim); }
-  .box { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 7px; border-radius: 10px;
-         border: 1px solid var(--line); color: var(--dim); font-size: .8rem; }
-  .box.solved { background: var(--ok); border-color: var(--ok); color: #0b1a12; }
-  .box.open { border-color: var(--open); color: var(--open); }
-  .box.playing { border-color: var(--open); background: var(--open); color: #1d1606; }
-  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.num, th.num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  td.zero { color: var(--dim); }
+  @media (max-width: 600px) {  /* the box cards below show the same */
+    th:last-child, td:last-child { display: none; }
+    th, td { padding: 8px 4px; }
+  }
   .done { color: var(--ok); font-weight: 600; }
-  .clock { font-variant-numeric: tabular-nums; font-size: 1.3rem; }
+  .pill { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 7px; border-radius: 10px;
+          border: 1px solid var(--line); color: var(--dim); font-size: .8rem; }
+  .pill.solved { background: var(--ok); border-color: var(--ok); color: #0b1a12; }
+  .pill.open { border-color: var(--open); color: var(--open); }
+  .pill.playing { border-color: var(--open); background: var(--open); color: #1d1606; }
+  .legend { color: var(--dim); font-size: .8rem; margin-top: 6px; }
+  .legend .pill { margin-left: 8px; }
+
+  .boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .card.busy { border-color: var(--open); }
+  .card .name { font-weight: 600; font-size: 1.05rem; }
+  .card .sub { color: var(--dim); font-size: .8rem; }
+  .card .status { margin-top: 8px; }
+  .card .status.free { color: var(--dim); }
+  .card .status.busy { color: var(--open); font-weight: 600; }
+  .card .timer { font-variant-numeric: tabular-nums; }
+  .card .data { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: .85rem; }
+  .card .data .k { color: var(--dim); }
+  .card .data .v { font-variant-numeric: tabular-nums; margin-right: 10px; }
+  .card .data .age { color: var(--dim); font-size: .75rem; display: block; margin-top: 2px; }
+  .card .data.err { color: var(--bad); }
+
+  .feed { list-style: none; margin: 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 4.6em 1.4em minmax(0, 1fr); gap: 6px; padding: 7px 4px;
+             border-bottom: 1px solid var(--line); align-items: baseline; }
+  .feed li.new { background: rgba(224, 180, 76, .2); }  /* first seen in the last NEW_MS */
+  .feed .t { color: var(--dim); font-variant-numeric: tabular-nums; font-size: .8rem; }
+  .feed .i { text-align: center; }
+  .feed .good .i { color: var(--ok); }
+  .feed .warn .i { color: var(--open); }
+  .feed .bad .i { color: var(--bad); }
+  .feed .info .i { color: var(--info); }
+  .feed .boxdata .i { color: var(--info); }
+  .boxlog { margin-top: 10px; border-top: 1px solid var(--line); font-size: .82rem; }
+  .boxlog li { grid-template-columns: 4.4em 1.2em minmax(0, 1fr); padding: 4px 2px; }
+  .boxlog li:last-child { border-bottom: 0; }
+  .boxlog .empty { padding: 6px 2px; }
+  .feed .cost { color: var(--dim); font-size: .85rem; }
+  .empty { color: var(--dim); padding: 8px 4px; }
 </style>
 </head>
 <body>
 <h1 id="title">Scavenger hunt</h1>
-<div class="meta"><span id="state"></span> <span class="clock" id="clock"></span></div>
-<div style="overflow-x:auto"><table>
-  <thead><tr><th>#</th><th>Team</th><th>Points</th><th>Time</th><th>Solved</th><th>Boxes</th></tr></thead>
-  <tbody id="rows"></tbody>
-</table></div>
+<div class="meta"><span id="state"></span><span class="clock" id="clock"></span></div>
+
+<div class="layout">
+  <div>
+    <h2>Standings</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>#</th><th>Team</th><th class="num">Points</th><th class="num">Time</th>
+        <th class="num">Hints</th><th class="num">Wrong</th><th>Solved</th><th>Boxes</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="legend">Time is time spent at boxes, plus hint and wrong-answer penalties. Lower wins a tie on points.
+      <span class="pill solved">solved</span><span class="pill playing">playing</span><span class="pill open">open</span><span class="pill">locked</span></div>
+
+    <h2>Boxes</h2>
+    <div class="boxes" id="boxes"></div>
+  </div>
+  <div>
+    <h2>What's happening</h2>
+    <ul class="feed" id="feed"><li class="empty">Nothing yet.</li></ul>
+  </div>
+</div>
+
 <script>
-let view = null, rank = [];
+let view = null, rank = [], boxData = {}, events = [], lastEvent = 0, runId = null, runStart = 0;
+// When each log line (event id, or "d<box><time>" for box data) was first seen:
+// new ones are highlighted for NEW_MS. What's there when the page loads isn't new.
+const firstSeen = new Map(), NEW_MS = 3000;
+let primed = false;
+const isNew = ids => ids.some(id => {
+  if (!firstSeen.has(id)) firstSeen.set(id, primed ? Date.now() : 0);
+  return Date.now() - firstSeen.get(id) < NEW_MS;
+});
+const dataIds = () => Object.entries(boxData).flatMap(([b, d]) => ((d && d.recent) || []).map(x => `d${b}${x.received_at}`));
 const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+const mmss = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const hex4 = n => "0x" + n.toString(16).toUpperCase().padStart(4, "0");
+const ago = ms => { const s = Math.floor(ms / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : `${Math.floor(s / 3600)} h ago`; };
+const clockTime = at => new Date(at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+const shortTime = at => new Date(at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
+
+const boxById = () => Object.fromEntries((view ? view.boxes : []).map(b => [b.id, b]));
+const teamName = id => { const t = view && view.run && view.run.teams.find(t => t.team === id); return t ? t.name : id; };
+
+// One log event as a line for people watching (GAME.md section 6 verdict codes).
+// `here`: for the box's own card, which needn't name the box.
+function describe(e, hintsSeen, here = false) {
+  const B = boxById(), b = B[e.box], name = b ? `<b>${esc(b.name)}</b>` : esc(e.box || "");
+  const box = here ? "this box" : name, at = here ? "here" : `at ${name}`;
+  const team = e.team ? `<b>${esc(teamName(e.team))}</b>` : "An unknown fob";
+  switch (e.kind) {
+    case "run_started": return ["info", "▶", "The run started"];
+    case "run_ended": return ["info", "■", `The run ended${e.reason ? ` (${esc(e.reason)})` : ""}`];
+    case "team_entered": return ["info", "+", `${team} joined`];
+    case "start":
+      switch (e.verdict) {
+        case 6: return ["good", "→", `${team} started playing ${box}`];
+        case 2: return ["warn", "✓", `${team} tried ${box} again: already solved`];
+        case 3: return ["bad", "🔒", `${team} tried ${box}: locked${b && b.requires.length ? `, solve ${b.requires.map(r => esc(B[r] ? B[r].name : r)).join(" and ")} first` : ""}`];
+        case 4: return ["bad", "?", `An unknown fob was used ${at}`];
+        case 5: return ["bad", "…", `${team} tried ${box}, but the run isn't on`];
+        case 7: return ["warn", "⏳", `${team} tried ${box}: another team is playing it`];
+        default: return ["info", "·", `${team} ${at}`];
+      }
+    case "claim":
+      switch (e.verdict) {
+        case 0: return ["good", "★", `${team} solved ${box}`, b ? `+${b.points} pts` : ""];
+        case 1: return ["good", "🏁", `${team} solved ${box} and finished the hunt!`, b ? `+${b.points} pts` : ""];
+        case 2: return ["warn", "✓", `${team} solved ${box} again (no extra points)`];
+        case 3: return ["bad", "🔒", `${team} claimed ${box} out of order: locked`];
+        case 8: return ["bad", "✗", `${team} claimed ${box} without starting it`];
+        default: return ["bad", "✗", `${team} claimed ${box}: refused`];
+      }
+    case "hint": {
+      if (e.verdict === 10) return ["warn", "?", `${team} asked for a hint ${at}: there are no more`];
+      if (e.verdict !== 9) return ["bad", "?", `${team} asked for a hint ${at}: refused`];
+      const key = `${e.team}/${e.box}`, again = (hintsSeen[key] || 0) >= e.n;
+      hintsSeen[key] = Math.max(hintsSeen[key] || 0, e.n);
+      const cost = !again && b && b.hint_penalties_s[e.n - 1] ? `+${b.hint_penalties_s[e.n - 1]} s` : again ? "again, free" : "";
+      return ["warn", "💡", `${team} took hint ${e.n} ${at}`, cost];
+    }
+    case "wrong":
+      return ["bad", "✗", `${team} gave a wrong answer ${at}`,
+              e.counted && b && b.wrong_penalty_s ? `+${b.wrong_penalty_s} s` : e.counted ? "" : "not in a session"];
+    case "end": return ["warn", "⏏", `${e.team ? team : "The team"} gave up ${at}`];
+    case "session_closed": return ["info", "⏏", `${here ? "Session" : `${name}: session`} closed${e.reason ? ` (${esc(e.reason)})` : ""}`];
+    case "correction":
+      return ["info", "✎", `Operator ${e.action === "add" ? "gave" : "took"} ${box} ${e.action === "add" ? "to" : "from"} ${team}${e.note ? `: ${esc(e.note)}` : ""}`];
+    default: return ["info", "·", esc(e.kind)];
+  }
+}
+
+// Box data from the hub, as a log line: the decoded fields, or the raw bytes.
+function describeData(d) {
+  const fields = d.decoded
+    ? Object.entries(d.decoded).map(([k, v]) => `${esc(k)} <b>${esc(typeof v === "number" && !Number.isInteger(v) ? +v.toFixed(3) : v)}</b>`).join(" · ")
+    : `bytes <b>${esc(d.payload)}</b>${d.decode_error ? ` (${esc(d.decode_error)})` : ""}`;
+  return ["boxdata", "◆", `Box data: ${fields}`];
+}
+
+// Merges runs of the same line into one, "×N"; lines are {at, id, d}.
+function collapse(lines) {
+  const out = [];
+  for (const l of lines) {
+    const last = out[out.length - 1];
+    if (last && last.d.join("|") === l.d.join("|")) { last.at = l.at; last.n++; last.ids.push(l.id); }
+    else out.push({at: l.at, d: l.d, n: 1, ids: [l.id]});
+  }
+  return out;
+}
+
+function line({at, d, n, ids}, time = clockTime) {
+  const [kind, icon, text, cost] = d, fresh = isNew(ids);
+  const times = n > 1 ? ` <span class="cost">×${n}</span>` : "";
+  return `<li class="${kind}${fresh ? " new" : ""}"><span class="t">${time(at)}</span>` +
+         `<span class="i">${icon}</span><span>${text}${cost ? ` <span class="cost">${esc(cost)}</span>` : ""}${times}</span></li>`;
+}
+
+function renderFeed() {
+  const feed = document.getElementById("feed");
+  if (!events.length) { feed.innerHTML = `<li class="empty">Nothing yet.</li>`; return; }
+  const hintsSeen = {};
+  const shown = collapse(events.map(e => ({at: e.at, id: e.id, d: describe(e, hintsSeen)}))).reverse().slice(0, 40);
+  feed.innerHTML = shown.map(l => line(l)).join("");
+}
+
+// A box's own log: its game events and its data, oldest first, the last BOX_LOG.
+const BOX_LOG = 8;
+function boxLog(b) {
+  const hintsSeen = {}, lines = [];
+  for (const e of events) {
+    const d = describe(e, hintsSeen, true);  // every event, so hint costs come out right
+    if (e.box === b.id) lines.push({at: e.at, id: e.id, d});
+  }
+  for (const d of (boxData[b.id] && boxData[b.id].recent) || [])
+    if (!runStart || d.received_at >= runStart) lines.push({at: d.received_at, id: `d${b.id}${d.received_at}`, d: describeData(d)});
+  lines.sort((x, y) => x.at - y.at);
+  const shown = collapse(lines).slice(-BOX_LOG);
+  if (!shown.length) return `<ul class="feed boxlog"><li class="empty">Nothing here yet.</li></ul>`;
+  return `<ul class="feed boxlog">${shown.map(l => line(l, shortTime)).join("")}</ul>`;
+}
+
+function renderBoxes() {
+  const run = view.run, now = Date.now();
+  document.getElementById("boxes").innerHTML = view.boxes.map(b => {
+    const s = run && run.sessions[b.id];
+    let status = `<div class="status free">Free</div>`;
+    if (s) {
+      const left = run.session_timeout_s * 1000 - (now - s.last);
+      status = `<div class="status busy">▶ ${esc(teamName(s.team))} playing ` +
+               `<span class="timer">${mmss(now - s.start)}</span></div>` +
+               `<div class="sub">times out in <span class="timer">${mmss(left)}</span> without activity</div>`;
+    }
+    const d = boxData[b.id];
+    let data = "";
+    if (boxData.error && b === view.boxes[0]) data = `<div class="data err">${esc(boxData.error)}</div>`;
+    else if (d) data = `<div class="sub">last box data ${ago(now - d.received_at)}</div>`;
+    const needs = b.requires.length ? `needs ${b.requires.map(r => esc((boxById()[r] || {name: r}).name)).join(", ")}` : "open from the start";
+    return `<div class="card${s ? " busy" : ""}"><div class="name">${esc(b.name)}</div>` +
+           `<div class="sub">${b.points} pts · ${needs}${b.required ? "" : " · optional"} · node ${hex4(b.node)}</div>` +
+           status + data + boxLog(b) + `</div>`;
+  }).join("");
+}
 
 function render() {
   if (!view) return;
@@ -54,23 +255,46 @@ function render() {
     const boxes = view.boxes.map(b => {
       const s = run && run.sessions[b.id];
       const cls = b.id in t.solved ? "solved" : s && s.team === r.team ? "playing" : t.open.includes(b.id) ? "open" : "";
-      return `<span class="box ${cls}">${esc(b.name)}${b.required ? "" : " ★"}</span>`;
+      return `<span class="pill ${cls}">${esc(b.name)}${b.required ? "" : " ★"}</span>`;
     }).join("");
     const done = r.finished_at ? `<span class="done">finished</span>` : `${r.required_solved} / ${r.required_total}`;
-    const extra = r.hints || r.wrong ? `<br><small>${r.hints} hints, ${r.wrong} wrong</small>` : "";
     return `<tr><td class="rank">${r.rank}</td><td>${esc(r.name)}</td><td class="num">${r.points}</td>` +
-           `<td class="num">${fmt(r.time_ms)}${extra}</td><td>${done}</td><td>${boxes}</td></tr>`;
+           `<td class="num">${fmt(r.time_ms)}</td><td class="num${r.hints ? "" : " zero"}">${r.hints}</td>` +
+           `<td class="num${r.wrong ? "" : " zero"}">${r.wrong}</td><td>${done}</td><td>${boxes}</td></tr>`;
   }).join("");
+  renderBoxes();
 }
 
 async function poll() {
   try {
-    [view, rank] = await Promise.all([fetch("/api/run").then(r => r.json()),
-                                      fetch("/api/standings").then(r => r.json())]);
+    const [v, r, d] = await Promise.all([fetch("/api/run").then(x => x.json()),
+                                         fetch("/api/standings").then(x => x.json()),
+                                         fetch("/api/box_data").then(x => x.json()).catch(() => ({}))]);
+    view = v; rank = r; boxData = d;
+    const rid = v.run ? v.run.id : null;
+    runStart = v.run ? v.run.started_at || 0 : 0;
+    if (rid !== runId) {  // a new run: its log starts over
+      runId = rid; events = []; lastEvent = 0;
+    }
+    if (rid) {
+      const more = await fetch(`/api/events?after=${lastEvent}`).then(x => x.json());
+      if (more.length) {
+        events = events.concat(more);
+        lastEvent = more[more.length - 1].id;
+        renderFeed();
+      }
+    } else {
+      renderFeed();
+    }
   } catch (e) { /* keep showing the last view */ }
   render();
+  if (!primed) {  // everything on the page at load is history, not news
+    events.forEach(e => firstSeen.set(e.id, 0));
+    dataIds().forEach(id => firstSeen.set(id, 0));
+    primed = true;
+  }
 }
-poll(); setInterval(poll, 3000); setInterval(render, 1000);
+poll(); setInterval(poll, 2000); setInterval(render, 1000);
 </script>
 </body>
 </html>

@@ -169,7 +169,8 @@ def serve(game, store, scfg, api_cfg, db_path) -> int:
     if api_cfg.get("enabled", True):
         threading.Thread(
             target=api.serve,
-            args=(game, db_path, api_cfg.get("host", "127.0.0.1"), int(api_cfg.get("port", 8090))),
+            args=(game, db_path, api_cfg.get("host", "127.0.0.1"), int(api_cfg.get("port", 8090)),
+                  api_cfg.get("hub_api")),
             daemon=True,
         ).start()
     service.run(game, store, scfg, stop)

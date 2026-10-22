@@ -67,3 +67,6 @@ allow_insecure = false       # true accepts unsecured WINs: bench testing only
 [api]
 host = "127.0.0.1"
 port = 8090
+# The hub's read-only API: the scoreboard shows each box's latest own data
+# (sensor readings) from it. Omit to leave that out.
+# hub_api = "http://127.0.0.1:8080"

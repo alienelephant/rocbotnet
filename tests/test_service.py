@@ -292,3 +292,25 @@ def test_cli(tmp_path, capsys, monkeypatch):
     assert run("end") == 0
     r = Store(db).load(game, "evening")
     assert r.state == "ended" and r.tokens[b"RED7"] == "red" and "vault" in r.teams["red"].solved
+
+
+def test_box_data_from_the_hub(env):
+    game, *_ = env
+    asked = []
+
+    def hub(url):
+        asked.append(url)
+        if "node=513" not in url:  # only the vault (0x201) has sent any
+            return []
+        return [  # newest first, as the hub's /api/uplinks answers
+            {"schema": 2, "received_at": 3, "payload": "0103524544"},
+            {"schema": 32, "received_at": 2, "payload": "a708", "decoded": {"temp_c": 22.15},
+             "decode_error": None},
+        ]
+
+    data = api.box_data(game, "http://hub:8080/", get=hub)
+    latest = {"received_at": 2, "schema": 32, "payload": "a708", "decoded": {"temp_c": 22.15},
+              "decode_error": None}
+    assert data == {"vault": {**latest, "recent": [latest]}}
+    assert asked[0] == "http://hub:8080/api/uplinks?net=66&node=513&min_schema=32&limit=10"
+    assert len(asked) == len(game.boxes)
