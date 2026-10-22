@@ -1,6 +1,6 @@
 # roclink scavenger hunt
 
-An IoT scavenger hunt played with [roclink](../roclink-rfc). Teams solve physical puzzle boxes; each box has a roclink node in it. A team taps its card on a box to start playing it, and the game times the team at that box. Hints and wrong answers cost time, and solving a box earns points. This service judges each message a box sends, records it, and sends the box its verdict. Teams that solve every required box finish, and are ranked by points, then by time.
+An IoT scavenger hunt played with [roclink](../../protocol/roclink-rfc). Teams solve physical puzzle boxes; each box has a roclink node in it. A team taps its card on a box to start playing it, and the game times the team at that box. Hints and wrong answers cost time, and solving a box earns points. This service judges each message a box sends, records it, and sends the box its verdict. Teams that solve every required box finish, and are ranked by points, then by time.
 
 - **[docs/GAME.md](docs/GAME.md)** is the game: vocabulary, the formal model, rules, flows, the messages on the wire, and how cheating is stopped.
 - **`scavhunt/`** is the backend, a roclink hub service over MQTT.
@@ -70,7 +70,7 @@ Boxes must send at security level `enc` (GAME.md rule 1). For a bench test with 
 
 ## Simulated boxes
 
-`tools/scavbox.py` plays boxes as secured roclink nodes over UDP, through a real gateway, hub and this service. It needs `cryptography` and `../roclink-rfc`:
+`tools/scavbox.py` plays boxes as secured roclink nodes over UDP, through a real gateway, hub and this service. It needs `cryptography` and `../../protocol/roclink-rfc`:
 
 ```bash
 .venv/bin/pip install cryptography

@@ -20,8 +20,7 @@ Then type commands, or pipe them in (each waits for its verdict):
 
 Frame counters are kept in ~/.roclink-scavbox-<net>-<node>, so each run
 continues where the last left off, as a real node must. Uses roclink-rfc's
-reference sealing (tools/gen_vectors.py), from the repository next to this one
-or --rfc.
+reference sealing (tools/gen_vectors.py), from ../../protocol/roclink-rfc or --rfc.
 """
 
 from __future__ import annotations
@@ -215,8 +214,8 @@ def main() -> int:
                    help="a box and its node address in hex, e.g. vault=0201; repeat for more")
     p.add_argument("--master", help="network master key, 32 hex digits (default: the demo key)")
     p.add_argument("--rfc", type=pathlib.Path,
-                   default=pathlib.Path(__file__).resolve().parents[2] / "roclink-rfc",
-                   help="the roclink-rfc repository (default: next to this one)")
+                   default=pathlib.Path(__file__).resolve().parents[3] / "protocol" / "roclink-rfc",
+                   help="the roclink-rfc repository (default: ../../protocol/roclink-rfc)")
     a = p.parse_args()
 
     global rv
