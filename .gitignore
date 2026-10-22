@@ -1,0 +1,3 @@
+# Per-project ignores are in each folder. These hold everywhere:
+.DS_Store
+.vault-pass

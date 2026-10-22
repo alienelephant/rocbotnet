@@ -1,6 +1,6 @@
-# rocbotnet
+# robo_rf_gateways
 
-Everything for the roclink scavenger hunt: the protocol, the gateway, the hub and game, the proxies, and the boxes. Each folder holds one or more git repositories; they find each other by these relative paths, so keep the layout.
+Everything for the roclink scavenger hunt: the protocol, the gateway, the hub and game, the proxies, and the boxes, in one repository. Clone it as `~/rocbotnet` on the bench Mac. The projects find each other by these relative paths, so keep the layout.
 
 ```
  scavbox ──UART──► rfidprox ──Wi-Fi or LoRa──► rfgateway (Pi) ──MQTT──► hub ──► game ──► scoreboard
@@ -8,7 +8,7 @@ Everything for the roclink scavenger hunt: the protocol, the gateway, the hub an
                     forwarding)  secured        mosquitto
 ```
 
-| Folder | Repository | What it is |
+| Folder | Project | What it is |
 |---|---|---|
 | `protocol/` | `roclink-rfc` | The roclink wire protocol (docs/PROTOCOL.md) and its C library, used by the proxies and the gateway |
 | `rfgateways/` | `roclink-gateway` | The gateway daemon (`gw/roclink_gw.c`) and the Ansible that sets up the Pi: LoRa concentrator, MQTT broker, Wi-Fi access point, the daemon |
@@ -16,7 +16,7 @@ Everything for the roclink scavenger hunt: the protocol, the gateway, the hub an
 | `hub/` | `roclink-scavhunt` | The game: rules, the hub service, the scoreboard. `tools/scavbox.py` simulates boxes |
 | `rfidproxies/` | `rfidprox` | The proxy firmware (Heltec V3/V4, XIAO ESP32-S3; Wi-Fi or LoRa), `boxlink/` (the box's library) and `tools/boxsim.py` |
 | `scavboxes/` | `roclink-scavbox-wifi`, `roclink-scavbox-lora` | Demo puzzle boxes: the ESP32 behind the XIAO (Wi-Fi), the ESP32-S3 behind the Heltec (LoRa) |
-| `infra/` | `roclink-bench` | This Mac's running hub and game: configs, the `roclink` script, `setup.sh`, `workspace.sh` |
+| `infra/` | `roclink-bench` | This Mac's running hub and game: configs, the `roclink` script, `setup.sh`, the VS Code workspace |
 
 ## Tools on the Mac
 
@@ -25,9 +25,9 @@ Everything for the roclink scavenger hunt: the protocol, the gateway, the hub an
 | PlatformIO | building and flashing firmware | VS Code's PlatformIO extension, or `~/.platformio/penv/bin/pio` |
 | uv, Python 3.12 | the hub and the game | `infra/roclink-bench/setup.sh` installs them |
 | Ansible | setting up the gateway Pi | `uv tool install --with passlib ansible` |
-| git | everything | `infra/roclink-bench/workspace.sh status`, `pull`, `push` |
+| git | everything | one repository: `git pull`, `git push` at the top |
 
-The gateway's secrets are in `rfgateways/roclink-gateway/group_vars/all/vault.yml`, encrypted with the password in `rfgateways/roclink-gateway/.vault-pass` (git-ignored: copy it between machines by hand).
+The gateway's secrets are in `rfgateways/roclink-gateway/group_vars/all/vault.yml`, encrypted with the password in `rfgateways/roclink-gateway/.vault-pass`, which is never committed: copy it between machines by hand.
 
 ## Common tasks
 

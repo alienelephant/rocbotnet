@@ -1,6 +1,6 @@
 # roclink-bench
 
-The running roclink hub and scavenger hunt on the bench Mac, and the scripts that keep the rocbotnet workspace together. [WORKSPACE.md](WORKSPACE.md) is the map of the whole system (linked as `~/rocbotnet/README.md`).
+The running roclink hub and scavenger hunt on the bench Mac. The [top-level README](../../README.md) is the map of the whole system.
 
 | File | |
 |---|---|
@@ -8,8 +8,7 @@ The running roclink hub and scavenger hunt on the bench Mac, and the scripts tha
 | `roclink` | `start`, `stop`, `restart`, `status`, `logs`, `watch` (the broker, as admin), and `scavhunt …` (the game's operator commands) |
 | `etc/hub.toml.in` | The hub's config: the Pi's broker, the boxes' device types and decoders, the route to the game. `@HUB_PASSWORD@` is filled in from the vault |
 | `etc/game.toml` | The game: its boxes (the real ones: the Heltec's Tower, the XIAO's Workshop), scoring, the scoreboard |
-| `workspace.sh` | `status`, `pull`, `push`, `clone` across every repository in the workspace |
-| `rocbotnet.code-workspace` | VS Code: every repository as a folder (`code rocbotnet.code-workspace`); PlatformIO finds the firmware projects |
+| `rocbotnet.code-workspace` | VS Code: every project as a folder (`code rocbotnet.code-workspace`); PlatformIO finds the firmware projects |
 
 ## The running bench
 
