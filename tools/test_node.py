@@ -20,7 +20,7 @@ import socket
 import struct
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "roclink-rfc" / "tools"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "protocol" / "roclink-rfc" / "tools"))
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM  # noqa: E402
 from gen_vectors import ACK, DATA, SECURED, derive_node_key, frame_key, header, seal  # noqa: E402
 

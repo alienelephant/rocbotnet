@@ -19,8 +19,8 @@ roclink_nets:
 roclink_udp_port: 3333       # Wi-Fi nodes (wifi_udp sketches); 0 turns it off
 roclink_policies: []         # e.g. ["allow_none = 42:1234", "deny = 42:1235"]
 
-# roclink's library, from the roclink-rfc repository next to this one
-roclink_src: "{{ playbook_dir }}/../roclink-rfc/src"
+# roclink's library, from the roclink-rfc repository (rocbotnet/protocol/)
+roclink_src: "{{ playbook_dir }}/../../protocol/roclink-rfc/src"
 
 # --- MQTT
 mqtt_port: 1883

@@ -1,5 +1,5 @@
 # roclink-gw: the gateway daemon. ROCLINK_SRC is roclink's src/ (roclink-rfc).
-ROCLINK_SRC ?= ../../roclink-rfc/src
+ROCLINK_SRC ?= ../../../protocol/roclink-rfc/src
 PREFIX ?= /usr/local
 
 CC ?= cc

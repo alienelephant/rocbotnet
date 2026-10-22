@@ -18,7 +18,7 @@ A roclink gateway for a Raspberry Pi with an SX1302 LoRa concentrator HAT, which
 
 | Path | What it is |
 |---|---|
-| `gw/roclink_gw.c` | The gateway daemon: C, built on the Pi against roclink's `src/` (from `../roclink-rfc`), libmosquitto, cJSON and OpenSSL |
+| `gw/roclink_gw.c` | The gateway daemon: C, built on the Pi against roclink's `src/` (from `../../protocol/roclink-rfc`), libmosquitto, cJSON and OpenSSL |
 | `roles/pi_base` | Turns on SPI and I2C (and reboots), installs build tools |
 | `roles/mosquitto` | The broker: no anonymous access, a password per user, roclink's ACL |
 | `roles/sx1302` | Semtech's HAL and packet forwarder: built from source, patched for boards without a temperature sensor, a one-channel config, a `pinctrl` reset script |
@@ -28,7 +28,7 @@ A roclink gateway for a Raspberry Pi with an SX1302 LoRa concentrator HAT, which
 
 ## Setting up a gateway
 
-Needs `ansible`, the Pi reachable with a key, passwordless sudo for that user, and `../roclink-rfc` checked out next to this repo.
+Needs `ansible`, the Pi reachable with a key, passwordless sudo for that user, and `roclink-rfc` checked out at `../../protocol/roclink-rfc` (the rocbotnet layout).
 
 ```bash
 ansible-playbook site.yml              # everything; reboots once to turn SPI and I2C on
