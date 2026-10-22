@@ -1,0 +1,19 @@
+{
+  // Open with: code ~/rocbotnet/infra/roclink-bench/rocbotnet.code-workspace
+  // Each repository is a folder; PlatformIO finds the firmware projects among them.
+  "folders": [
+    { "name": "protocol: roclink-rfc", "path": "../../protocol/roclink-rfc" },
+    { "name": "rfgateways: roclink-gateway", "path": "../../rfgateways/roclink-gateway" },
+    { "name": "hub: roclink-hub", "path": "../../hub/roclink-hub" },
+    { "name": "hub: roclink-scavhunt", "path": "../../hub/roclink-scavhunt" },
+    { "name": "rfidproxies: rfidprox firmware", "path": "../../rfidproxies/rfidprox/firmware" },
+    { "name": "rfidproxies: rfidprox", "path": "../../rfidproxies/rfidprox" },
+    { "name": "scavboxes: roclink-scavbox-wifi", "path": "../../scavboxes/roclink-scavbox-wifi" },
+    { "name": "scavboxes: roclink-scavbox-lora", "path": "../../scavboxes/roclink-scavbox-lora" },
+    { "name": "infra: roclink-bench", "path": "." }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "~/roclink/venv/hub/bin/python",
+    "files.exclude": { "**/.pio": true, "**/__pycache__": true, "**/*.egg-info": true }
+  }
+}

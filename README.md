@@ -9,6 +9,7 @@ The running roclink hub and scavenger hunt on the bench Mac, and the scripts tha
 | `etc/hub.toml.in` | The hub's config: the Pi's broker, the boxes' device types and decoders, the route to the game. `@HUB_PASSWORD@` is filled in from the vault |
 | `etc/game.toml` | The game: its boxes (the real ones: the Heltec's Tower, the XIAO's Workshop), scoring, the scoreboard |
 | `workspace.sh` | `status`, `pull`, `push`, `clone` across every repository in the workspace |
+| `rocbotnet.code-workspace` | VS Code: every repository as a folder (`code rocbotnet.code-workspace`); PlatformIO finds the firmware projects |
 
 ## The running bench
 
