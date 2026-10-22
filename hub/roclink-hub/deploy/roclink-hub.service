@@ -1,0 +1,30 @@
+[Unit]
+Description=roclink hub: MQTT uplinks into SQLite
+Wants=network-online.target
+After=network-online.target mosquitto.service
+
+[Service]
+Type=simple
+User=roclink
+Group=roclink
+ExecStart=/opt/roclink-hub/venv/bin/roclink-hub --config /etc/roclink-hub/config.toml
+# SIGTERM goes to the supervisor only. It stops the children in order, and
+# systemd kills whatever is left once the supervisor exits.
+KillMode=mixed
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=5
+
+# /var/lib/roclink-hub, owned by roclink. Group members (a web UI, say) can
+# open the database read-only: WAL readers need the -shm file to be writable.
+StateDirectory=roclink-hub
+StateDirectoryMode=0770
+UMask=0007
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
