@@ -1,0 +1,71 @@
+# roclink-hub on the MacBook Pro: a temporary hub for testing the scavenger
+# hunt end to end. The broker is the rfgateway Pi's mosquitto.
+log_level = "INFO"
+
+[database]
+path = "@ROCLINK_DIR@/data/hub.db"
+
+[mqtt]
+host = "192.168.8.237"
+port = 1883
+client_id = "roclink-hub"
+username = "roclink-hub"
+password = "@HUB_PASSWORD@"
+
+[api]
+host = "127.0.0.1"
+port = 8080
+
+[public]
+nets = [0xF0]
+db_path = "@ROCLINK_DIR@/data/public.db"
+
+[public.api]
+enabled = true
+host = "127.0.0.1"
+port = 8081
+
+# The box's own data on schema 32: BoxLink's example sketch (boxlink/examples/sensor_box).
+[decoder.box-reading]
+struct = "<hfB"
+fields = ["temp_c", "humidity", "flags"]
+scale = { temp_c = 0.01 }
+bits = { flags = ["door_open", "lid_closed"] }
+
+# The game's boxes: simulated ones (tools/scavbox.py) at 0x0200-0x02FF, and the
+# Heltec breadboard (rfidprox, game-box build) at 0x0301.
+[[device_type]]
+name = "scavhunt-box"
+class = "always_listening"
+schemas = { 32 = "box-reading" }   # the box's own data (BOXLINK.md 9); 1-5 are the game's
+
+[[node]]
+net = 0x42
+nodes = ["0x0200-0x02FF"]
+type = "scavhunt-box"
+
+# The scavbox examples: an ESP32 box behind a proxy, the XIAO over Wi-Fi at
+# 0x0302 (roclink-scavbox-wifi), the Heltec over LoRa at 0x0301
+# (roclink-scavbox-lora). Its schema 32 is its own: press count and hold time.
+[decoder.scavbox-press]
+struct = "<HH"
+fields = ["presses", "held_ms"]
+
+[[device_type]]
+name = "scavbox"
+class = "always_listening"
+schemas = { 32 = "scavbox-press" }
+
+[[node]]
+net = 0x42
+nodes = ["0x0301", "0x0302"]
+type = "scavbox"
+
+[[route]]
+service = "scavhunt"
+net = 0x42
+types = ["scavhunt-box", "scavbox"]
+schemas = [1, 2, 3, 4, 5, 10, 11]  # the game's messages, both ways (a route also limits downlink)
+
+[schemas]
+1 = "text"
