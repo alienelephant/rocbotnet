@@ -1,12 +1,12 @@
 # roclink-hub
 
-A demo hub: one implementation of the system behind the gateways ("hub / server software" in roclink's use cases). It isn't part of the wire protocol, and it doesn't define what a hub must be. It speaks the draft gateway interface ([docs/GATEWAY_INTERFACE.md](docs/GATEWAY_INTERFACE.md)), and does the few things the wire protocol requires of any hub ([PROTOCOL.md §9.1](../roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do)). Everything else here is one way to do it, free to change.
+A demo hub: one implementation of the system behind the gateways ("hub / server software" in roclink's use cases). It isn't part of the wire protocol, and it doesn't define what a hub must be. It speaks the draft gateway interface ([docs/GATEWAY_INTERFACE.md](docs/GATEWAY_INTERFACE.md)), and does the few things the wire protocol requires of any hub ([PROTOCOL.md §9.1](../../protocol/roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do)). Everything else here is one way to do it, free to change.
 
 It drains roclink uplinks from MQTT and:
 
 - stores them in SQLite for other processes to read;
 - delivers them to the services they're routed to;
-- refuses secured frames replayed from one gateway to another (it's a security control: [PROTOCOL.md §9.1](../roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do));
+- refuses secured frames replayed from one gateway to another (it's a security control: [PROTOCOL.md §9.1](../../protocol/roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do));
 - queues services' downlink, numbers it per node, and sends it through the right gateway;
 - keeps a public net, separate from everything else, for developers testing devices;
 - counts the frames gateways drop, and alerts operators to likely attacks.
@@ -100,7 +100,7 @@ The pattern lines in [deploy/mosquitto.acl](deploy/mosquitto.acl) give each brok
 
 ## The public net
 
-For developers testing a device with no keys and no account. It's a separate **net id** (for example `0xF0`), not a topic or a schema, so roclink's own receiver policy ([PROTOCOL.md §10.1](../roclink-rfc/docs/PROTOCOL.md#101-levels-and-policy)) keeps it apart. In the protocol's terms it is an *open net* ([PROTOCOL.md Annex B](../roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation)): no secured nodes, so it is the one kind of net allowed to use `allow-none` network-wide.
+For developers testing a device with no keys and no account. It's a separate **net id** (for example `0xF0`), not a topic or a schema, so roclink's own receiver policy ([PROTOCOL.md §10.1](../../protocol/roclink-rfc/docs/PROTOCOL.md#101-levels-and-policy)) keeps it apart. In the protocol's terms it is an *open net* ([PROTOCOL.md Annex B](../../protocol/roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation)): no secured nodes, so it is the one kind of net allowed to use `allow-none` network-wide.
 
 - **Gateway policy:** gateways use `allow-none` on the public net and `require-enc` on every other net. On a net with secured nodes, `allow-none` can only be set per node. An unsecured device works on the public net, but the same device set to a private net id is dropped at the gateway.
 - **Never routed to a service:** the config refuses a `[[route]]` on a public net. Everything on it is visible to anyone, and anyone with a radio can claim any node id.
@@ -167,7 +167,7 @@ Both databases have the same schema:
 
 Times are unix ms (UTC). Addresses are integers. The schema is versioned with `PRAGMA user_version` (see `db.MIGRATIONS`). Messages that can't be parsed go to `hub.db`, since a gateway sent them.
 
-**Duplicates** ([PROTOCOL.md §10.5](../roclink-rfc/docs/PROTOCOL.md#105-frame-counters) and [PROTOCOL.md Annex B](../roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation)):
+**Duplicates** ([PROTOCOL.md §10.5](../../protocol/roclink-rfc/docs/PROTOCOL.md#105-frame-counters) and [PROTOCOL.md Annex B](../../protocol/roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation)):
 - **Secured:** the same `(net, node, key_gen, fcnt)` is the same frame, whenever it arrives. A unique index enforces this as well. A replay of an older frame never gets this far: ingest's anti-replay window drops it first.
 - **Unsecured:** the same `seq`, `schema` and payload within `dedupe_window_s` (60 s).
 
@@ -196,7 +196,7 @@ The format is drafted in [docs/GATEWAY_INTERFACE.md](docs/GATEWAY_INTERFACE.md),
 
 ## Payload decoders
 
-Schemas belong to device types ([PROTOCOL.md §5](../roclink-rfc/docs/PROTOCOL.md#5-message-schemas)): each maker's firmware owns its own schemas 1–255, so the hub decodes by `(device type, schema)`. The config says which nodes are which type, and nodes that aren't registered fall back to a deployment-wide `[schemas]` table:
+Schemas belong to device types ([PROTOCOL.md §5](../../protocol/roclink-rfc/docs/PROTOCOL.md#5-message-schemas)): each maker's firmware owns its own schemas 1–255, so the hub decodes by `(device type, schema)`. The config says which nodes are which type, and nodes that aren't registered fall back to a deployment-wide `[schemas]` table:
 
 ```toml
 [[device_type]]
@@ -289,7 +289,7 @@ journalctl -u roclink-hub -f
 
 **Mosquitto.** Install [deploy/mosquitto.acl](deploy/mosquitto.acl) as `/etc/mosquitto/roclink.acl` and add the settings at its top to `/etc/mosquitto/conf.d/roclink.conf`. Then create the broker users: `roclink-gw` (gateways), `roclink-hub` (set it as `[mqtt] username` and `password`), `roclink-ops` (whoever watches alerts), and one per service. `max_queued_messages` in those settings matters: Mosquitto's default keeps only 1000 messages per offline session.
 
-Gateways must publish at QoS 1 for the broker to queue messages for the hub. [SECURITY.md](../roclink-rfc/docs/SECURITY.md) calls for TLS on the gateway → broker link. Service topics carry decrypted payloads, so use TLS for every service that isn't on the Pi itself. In the hub, set `tls` and `ca_file` in `[mqtt]`.
+Gateways must publish at QoS 1 for the broker to queue messages for the hub. [SECURITY.md](../../protocol/roclink-rfc/docs/SECURITY.md) calls for TLS on the gateway → broker link. Service topics carry decrypted payloads, so use TLS for every service that isn't on the Pi itself. In the hub, set `tls` and `ca_file` in `[mqtt]`.
 
 On x86-64, the first version's five processes used about 120 MB RSS in total. The router, public writer and public API each add another 20–25 MB. That's well within the 3B+'s 1 GB.
 
@@ -311,14 +311,14 @@ On x86-64, the first version's five processes used about 120 MB RSS in total. Th
 
 ## The hub as a security control
 
-Each gateway refuses a frame counter it has already accepted, but only its own. A secured frame recorded near one gateway and replayed to another that never heard it would pass that gateway's check, so the hub keeps a window over every gateway ([PROTOCOL.md §10.5](../roclink-rfc/docs/PROTOCOL.md#105-frame-counters), `roclink_hub/replay.py`):
+Each gateway refuses a frame counter it has already accepted, but only its own. A secured frame recorded near one gateway and replayed to another that never heard it would pass that gateway's check, so the hub keeps a window over every gateway ([PROTOCOL.md §10.5](../../protocol/roclink-rfc/docs/PROTOCOL.md#105-frame-counters), `roclink_hub/replay.py`):
 
 - per `(net, node, key_gen)`: the highest frame counter accepted, and a 64-bit map of the counters just below it, as IPsec does (RFC 4303);
 - above the highest, or in the window and unseen: **new** (gateways can forward one node's frames out of order);
 - in the window and seen: a **duplicate**, another gateway's copy, stored as a reception and never delivered again;
 - below the window: a **replay**, dropped and counted as a `replay` rejection.
 
-Ingest and the router each keep their window in their own state file (`ingest-replay.db`, `router-replay.db` in `state_dir`), written before a new frame goes any further, so a restart doesn't reopen it. Unsecured uplinks keep the time window of [PROTOCOL.md Annex B](../roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation).
+Ingest and the router each keep their window in their own state file (`ingest-replay.db`, `router-replay.db` in `state_dir`), written before a new frame goes any further, so a restart doesn't reopen it. Unsecured uplinks keep the time window of [PROTOCOL.md Annex B](../../protocol/roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation).
 
 ## Downlink
 
@@ -339,7 +339,7 @@ The hub answers on `roclink/svc/<service>/down_status`:
 
 `status` is `queued`, then one of `acked` (the node confirmed it), `sent` (no ACK was asked for), `failed` (it ran out of attempts or time), or straight away `refused` with a `detail`.
 
-What the hub does with it ([PROTOCOL.md §9.1](../roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do), `roclink_hub/downlink.py`):
+What the hub does with it ([PROTOCOL.md §9.1](../../protocol/roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do), `roclink_hub/downlink.py`):
 - **Numbering:** one persisted downlink `seq` per node, starting at a random value. A re-offer keeps its `seq`, even through another gateway, so the node can't run a command twice.
 - **Gateway:** the one that most recently heard the node. A node the hub hasn't heard from yet waits for its first uplink.
 - **When:** a sleepy node's downlink is offered for its next listen window (`"send": "window"`), for up to `offer_window_s`. An always-listening node's is sent at once (`"send": "now"`), bound to the frame counter of the node's most recent uplink the hub has seen (`"binding"`).

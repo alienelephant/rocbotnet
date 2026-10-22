@@ -1,6 +1,6 @@
 # roclink gateway interface (draft)
 
-**Status:** draft, and a separate RFC from the wire protocol. [PROTOCOL.md](../../roclink-rfc/docs/PROTOCOL.md) is normative for everything between nodes and gateways; this document drafts what happens next: how a gateway hands frames to the rest of the system, and what it accepts back. It's deliberately kept apart so the two can change at different speeds: the wire protocol is meant to stay stable, while this interface, and above all the hub behind it, are expected to change.
+**Status:** draft, and a separate RFC from the wire protocol. [PROTOCOL.md](../../../protocol/roclink-rfc/docs/PROTOCOL.md) is normative for everything between nodes and gateways; this document drafts what happens next: how a gateway hands frames to the rest of the system, and what it accepts back. It's deliberately kept apart so the two can change at different speeds: the wire protocol is meant to stay stable, while this interface, and above all the hub behind it, are expected to change.
 
 ## 1. Scope and roles
 
@@ -12,7 +12,7 @@
 - **The gateway** speaks the wire protocol to nodes. It opens and verifies frames, answers nodes, and publishes what it accepted and what it dropped.
 - **The broker** is an MQTT server. Its ACL decides who may publish and read each topic.
 - **The hub** is whatever consumes the gateways' messages. This document fixes only the messages and their data model. What a hub stores, how it routes to services, how it decodes payloads, alerts or exposes an API is left open, so hubs can differ and change. `hub/` in this repository is one demo implementation, not a definition.
-- **What every hub must still do** is set by the wire protocol, because the protocol's security depends on it: number downlink per node, refuse replays across gateways, and keep control messages from applications. See [PROTOCOL.md §9.1](../../roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do).
+- **What every hub must still do** is set by the wire protocol, because the protocol's security depends on it: number downlink per node, refuse replays across gateways, and keep control messages from applications. See [PROTOCOL.md §9.1](../../../protocol/roclink-rfc/docs/PROTOCOL.md#91-what-the-hub-must-do).
 
 **Conventions.** All messages are JSON objects. Ids may be numbers or `"0x…"` strings. Times are unix milliseconds on the sender's clock. Byte strings are hex. Every record carries a version `v` (1 by default); a receiver drops a version it doesn't know.
 
@@ -49,15 +49,15 @@ All records are JSON objects:
 | `v` | no (1) | Record version |
 | `gateway` | no | The forwarding gateway. Defaults to the one in the topic. |
 | `time` | no | When the gateway received the frame |
-| `net`, `src`, `seq`, `schema` | yes | Envelope fields ([PROTOCOL.md §3](../../roclink-rfc/docs/PROTOCOL.md#3-frame-format)) |
+| `net`, `src`, `seq`, `schema` | yes | Envelope fields ([PROTOCOL.md §3](../../../protocol/roclink-rfc/docs/PROTOCOL.md#3-frame-format)) |
 | `dst`, `flags` | no (0) | Envelope fields |
-| `sec` | no (`"none"`) | Security level: `none`, `auth` or `enc` ([PROTOCOL.md §10.1](../../roclink-rfc/docs/PROTOCOL.md#101-levels-and-policy)) |
-| `fcnt`, `key_gen` | if secured | From the security header ([PROTOCOL.md §10.2](../../roclink-rfc/docs/PROTOCOL.md#102-secured-frame-layout)) |
-| `session` | if in a session | The session's `join_fcnt` ([PROTOCOL.md §10.8](../../roclink-rfc/docs/PROTOCOL.md#108-sessions)). Session counters restart at 0, so replay checks across gateways are kept per session. |
+| `sec` | no (`"none"`) | Security level: `none`, `auth` or `enc` ([PROTOCOL.md §10.1](../../../protocol/roclink-rfc/docs/PROTOCOL.md#101-levels-and-policy)) |
+| `fcnt`, `key_gen` | if secured | From the security header ([PROTOCOL.md §10.2](../../../protocol/roclink-rfc/docs/PROTOCOL.md#102-secured-frame-layout)) |
+| `session` | if in a session | The session's `join_fcnt` ([PROTOCOL.md §10.8](../../../protocol/roclink-rfc/docs/PROTOCOL.md#108-sessions)). Session counters restart at 0, so replay checks across gateways are kept per session. |
 | `payload` | yes | The application payload, decrypted |
 | `radio` | no | `transport` (e.g. `lora`, `espnow`, `udp`), `rssi` (dBm), `snr` (dB) |
 
-A gateway publishes a DATA frame only after accepting and verifying it ([PROTOCOL.md §9](../../roclink-rfc/docs/PROTOCOL.md#9-gateway-server-rules) rule 1, [§10.7](../../roclink-rfc/docs/PROTOCOL.md#107-receiving-a-frame)), and only once: not its retransmissions ([PROTOCOL.md §9](../../roclink-rfc/docs/PROTOCOL.md#9-gateway-server-rules) rule 2). A `PING` is published too, as a record on schema 0 with payload `01`; `JOIN` frames are not. Several gateways may publish the same uplink. The hub must remove duplicates and replays across gateways (PROTOCOL.md §9.1), for example with a per-node window over `(net, src, key_gen, session, fcnt)` ([PROTOCOL.md §10.5](../../roclink-rfc/docs/PROTOCOL.md#105-frame-counters)), or by `(net, src, seq)` within a time window for unsecured nodes ([PROTOCOL.md Annex B](../../roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation)).
+A gateway publishes a DATA frame only after accepting and verifying it ([PROTOCOL.md §9](../../../protocol/roclink-rfc/docs/PROTOCOL.md#9-gateway-server-rules) rule 1, [§10.7](../../../protocol/roclink-rfc/docs/PROTOCOL.md#107-receiving-a-frame)), and only once: not its retransmissions ([PROTOCOL.md §9](../../../protocol/roclink-rfc/docs/PROTOCOL.md#9-gateway-server-rules) rule 2). A `PING` is published too, as a record on schema 0 with payload `01`; `JOIN` frames are not. Several gateways may publish the same uplink. The hub must remove duplicates and replays across gateways (PROTOCOL.md §9.1), for example with a per-node window over `(net, src, key_gen, session, fcnt)` ([PROTOCOL.md §10.5](../../../protocol/roclink-rfc/docs/PROTOCOL.md#105-frame-counters)), or by `(net, src, seq)` within a time window for unsecured nodes ([PROTOCOL.md Annex B](../../../protocol/roclink-rfc/docs/PROTOCOL.md#annex-b-unsecured-operation)).
 
 ## 4. Drop reports
 
@@ -80,7 +80,7 @@ A gateway reports each drop. What the hub does with the reports (counting, alert
  "radio": {"transport": "lora", "rssi": -41, "snr": 9.5}}
 ```
 
-The example is test vector S6 ([PROTOCOL.md §11](../../roclink-rfc/docs/PROTOCOL.md#11-test-vectors)) with its last tag byte changed, so the tag doesn't verify. Its header claims node `0x1234`.
+The example is test vector S6 ([PROTOCOL.md §11](../../../protocol/roclink-rfc/docs/PROTOCOL.md#11-test-vectors)) with its last tag byte changed, so the tag doesn't verify. Its header claims node `0x1234`.
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -107,11 +107,11 @@ The example is test vector S6 ([PROTOCOL.md §11](../../roclink-rfc/docs/PROTOCO
 | `key` | `ROCLINK_E_KEY` | Unsupported suite or unknown key generation | should |
 | `revoked` | `ROCLINK_E_REVOKED` | It claims a revoked node | **must** |
 | `not_enrolled` | `ROCLINK_E_NOT_ENROLLED` | Unknown node, and admission isn't open | should |
-| `epoch` | `ROCLINK_E_EPOCH` | Its epoch is beyond the ratchet limits ([PROTOCOL.md §10.4](../../roclink-rfc/docs/PROTOCOL.md#104-keys)) | should |
-| `replay` | `ROCLINK_E_REPLAY` | `fcnt` below the last accepted ([PROTOCOL.md §10.5](../../roclink-rfc/docs/PROTOCOL.md#105-frame-counters)) | should |
+| `epoch` | `ROCLINK_E_EPOCH` | Its epoch is beyond the ratchet limits ([PROTOCOL.md §10.4](../../../protocol/roclink-rfc/docs/PROTOCOL.md#104-keys)) | should |
+| `replay` | `ROCLINK_E_REPLAY` | `fcnt` below the last accepted ([PROTOCOL.md §10.5](../../../protocol/roclink-rfc/docs/PROTOCOL.md#105-frame-counters)) | should |
 | `auth` | `ROCLINK_E_AUTH` | The tag didn't verify | should |
-| `conflict` | `ROCLINK_E_CONFLICT` | An authentic frame reused a counter with different content ([PROTOCOL.md §10.5](../../roclink-rfc/docs/PROTOCOL.md#105-frame-counters)) | **must**, at once |
-| `no_session` | `ROCLINK_E_NO_SESSION` | A session-mode node's frame, and this gateway has no session with it: it restarted, or the node joined another gateway ([PROTOCOL.md §10.8](../../roclink-rfc/docs/PROTOCOL.md#108-sessions)) | may count only |
+| `conflict` | `ROCLINK_E_CONFLICT` | An authentic frame reused a counter with different content ([PROTOCOL.md §10.5](../../../protocol/roclink-rfc/docs/PROTOCOL.md#105-frame-counters)) | **must**, at once |
+| `no_session` | `ROCLINK_E_NO_SESSION` | A session-mode node's frame, and this gateway has no session with it: it restarted, or the node joined another gateway ([PROTOCOL.md §10.8](../../../protocol/roclink-rfc/docs/PROTOCOL.md#108-sessions)) | may count only |
 | `peers_full` | `ROCLINK_E_PEERS_FULL` | The gateway's secured peer store is full and has no entry for this node (PROTOCOL.md §9 rule 2). The unsecured duplicate table evicts instead and never causes this. | should |
 
 A retransmission (`ROCLINK_RX_DUPLICATE`) and schema-0 control frames are not drops and aren't reported.
@@ -119,7 +119,7 @@ A retransmission (`ROCLINK_RX_DUPLICATE`) and schema-0 control frames are not dr
 **Rules:**
 1. **Nothing in a report is verified,** except the reason.
    - Every field comes from a frame the gateway refused, so whoever sent it chose it: `src` is the address the frame *claims*.
-   - The exception is `conflict`, which is decided only after the tag verifies ([PROTOCOL.md §10.7](../../roclink-rfc/docs/PROTOCOL.md#107-receiving-a-frame) step 7). So the header of a `conflict` frame is authentic.
+   - The exception is `conflict`, which is decided only after the tag verifies ([PROTOCOL.md §10.7](../../../protocol/roclink-rfc/docs/PROTOCOL.md#107-receiving-a-frame) step 7). So the header of a `conflict` frame is authentic.
    - `revoked` is decided before any cryptography (step 2). Anyone can cause one by claiming a revoked address, so it's a lead to follow up, not proof that the stolen device is nearby.
    - Receivers must treat reports as attacker-controlled data, for example when showing them on a dashboard.
 2. **A gateway must bound its report rate.** Each forged frame costs the attacker one transmission. Without a bound, a flood of them becomes a flood of broker messages and fills the gateway's onward link.
@@ -128,7 +128,7 @@ A retransmission (`ROCLINK_RX_DUPLICATE`) and schema-0 control frames are not dr
    - It reports `conflict` at once, since only a key holder can cause one.
    - `roclink-gw` in the roclink-gateway repository does all of this (its `dropped()` and `flush_reports()`). Each interval (10 s by default), it reports the first drops (10 by default) one by one, then counts the rest and reports the counts when the interval ends.
 3. **Reports are private.** A frame dropped for `policy` may carry plaintext from a misconfigured device. A gateway publishes reports only on its `rejected` topic, which needs the same protection as its `up` topic.
-4. **Reporting changes nothing.** A dropped frame changes no protocol state ([PROTOCOL.md §10.7](../../roclink-rfc/docs/PROTOCOL.md#107-receiving-a-frame)), and neither does its report. The report is sent after the drop decision, and never delays a reply to a node.
+4. **Reporting changes nothing.** A dropped frame changes no protocol state ([PROTOCOL.md §10.7](../../../protocol/roclink-rfc/docs/PROTOCOL.md#107-receiving-a-frame)), and neither does its report. The report is sent after the drop decision, and never delays a reply to a node.
 5. **Include radio metadata where the carrier has it.** Signal strength is often the best evidence. A node that is usually received at −95 dBm whose frames suddenly fail authentication at −40 dBm points to a transmitter nearby.
 
 ## 5. Downlink
@@ -152,7 +152,7 @@ Whatever originates downlink (the hub) numbers it per node and hands each frame 
 | `seq` | The downlink `seq` the hub assigned (PROTOCOL.md §9.1). A re-offer keeps it. |
 | `ack` | Set `ACK_REQ` |
 | `send` | `"window"`: offer it in the node's next reply window (sleepy node). `"now"`: send it at once (always-listening node). |
-| `binding` | For `"now"` on a secured node: the `fcnt` of the node's most recent uplink the hub has seen ([PROTOCOL.md §10.6](../../roclink-rfc/docs/PROTOCOL.md#106-downlink-freshness)). Otherwise `null`. |
+| `binding` | For `"now"` on a secured node: the `fcnt` of the node's most recent uplink the hub has seen ([PROTOCOL.md §10.6](../../../protocol/roclink-rfc/docs/PROTOCOL.md#106-downlink-freshness)). Otherwise `null`. |
 | `session` | For a session-mode node: the session the binding belongs to (its `join_fcnt`, as in §3). A gateway that no longer has that session reports `expired`. |
 | `expires` | Unix ms after which the gateway gives up and reports `expired` |
 
