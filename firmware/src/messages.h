@@ -52,3 +52,33 @@ inline size_t auth_req(uint8_t *out, uint8_t req, uint16_t atqa, uint8_t sak, co
 }
 
 }  // namespace msg
+
+// The scavenger hunt's own box messages (roclink-scavhunt docs/GAME.md 0.2
+// section 6), for the game-box build (gamebox.cpp, docs/BOXLINK.md section 9): the proxy
+// sends them for its box, with the logged-in fob as the team's token.
+namespace game {
+
+constexpr uint8_t VERSION = 1;
+
+// schemas, box -> game
+constexpr uint8_t WIN = 1;
+constexpr uint8_t START = 2;
+constexpr uint8_t WRONG = 3;
+constexpr uint8_t HINT = 4;
+constexpr uint8_t END = 5;
+// schemas, game -> box
+constexpr uint8_t VERDICT = 10;  // ver | result | solved | required | arg u16
+constexpr uint8_t CONTROL = 11;  // ver | command (1 reset, 2 disable, 3 enable)
+
+// ver | token length | token | hint number (HINT only; pass hint 0 otherwise)
+inline size_t box_message(uint8_t *out, const uint8_t *token, uint8_t token_len, uint8_t hint) {
+    size_t n = 0;
+    out[n++] = VERSION;
+    out[n++] = token_len;
+    memcpy(out + n, token, token_len);
+    n += token_len;
+    if (hint) out[n++] = hint;
+    return n;
+}
+
+}  // namespace game

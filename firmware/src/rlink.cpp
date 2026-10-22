@@ -2,19 +2,15 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
 #include <roclink.h>
 #include <roclink_secure.h>
 
 #include "config.h"
+#include "transport.h"
 
 namespace rlink {
 
 static Preferences store;
-static WiFiUDP udp;
-static bool udp_open = false;
-static IPAddress gateway(GATEWAY_IP);
 static roclink_client_t node;
 static roclink_sec_t sec;
 static roclink_fcnt_t ctr;
@@ -60,17 +56,9 @@ static int seal(uint8_t *frame, int len, size_t cap) {
     }
 }
 
-static bool transmit(const uint8_t *frame, int len) {
-    if (!udp_open) return false;
-    digitalWrite(PIN_LED, HIGH);
-    udp.beginPacket(gateway, GATEWAY_PORT);
-    udp.write(frame, (size_t)len);
-    bool ok = udp.endPacket() == 1;
-    digitalWrite(PIN_LED, LOW);
-    return ok;
-}
+static bool transmit(const uint8_t *frame, int len) { return transport::send(frame, (size_t)len); }
 
-// Handles one received datagram: open, interpret, ACK downlink if asked.
+// Handles one received frame: open, interpret, ACK downlink if asked.
 static void handle(uint8_t *frame, size_t len) {
     roclink_sec_info_t info;
     int n = roclink_sec_open(&sec, NULL, frame, len, &info);
@@ -114,14 +102,11 @@ static void handle(uint8_t *frame, size_t len) {
 static void receive_for(uint32_t ms) {
     uint32_t start = millis();
     do {
-        if (udp_open) {
-            int size = udp.parsePacket();
-            if (size > 0) {
-                uint8_t frame[ROCLINK_FRAME_MAX_LEN];
-                int n = udp.read(frame, sizeof(frame));
-                if (n > 0) handle(frame, (size_t)n);
-                continue;
-            }
+        uint8_t frame[ROCLINK_FRAME_MAX_LEN];
+        int n = transport::receive(frame, sizeof(frame));
+        if (n > 0) {
+            handle(frame, (size_t)n);
+            continue;
         }
         if (ms) delay(5);
     } while (millis() - start < ms);
@@ -129,7 +114,9 @@ static void receive_for(uint32_t ms) {
 
 bool begin(DownlinkHandler on_downlink) {
     handler = on_downlink;
-    pinMode(PIN_LED, OUTPUT);
+#ifdef PIN_TX_LED
+    pinMode(PIN_TX_LED, OUTPUT);
+#endif
 
     static const uint8_t provisioned[16] = NODE_CHAIN_KEY;
     store.begin("roclink", false);
@@ -158,32 +145,22 @@ bool begin(DownlinkHandler on_downlink) {
     roclink_client_init(&node, &cfg, (uint8_t)esp_random());
     last_epoch_ms = millis();
 
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    Serial.printf("[link] node %02X/%04X, epoch %lu, joining %s%s\n", ROCLINK_NET, ROCLINK_NODE,
-                  (unsigned long)epoch, WIFI_SSID,
+    Serial.printf("[link] node %02X/%04X, epoch %lu%s\n", ROCLINK_NET, ROCLINK_NODE, (unsigned long)epoch,
 #ifdef NODE_KEY_IS_DEMO
                   " (DEMO key)"
 #else
                   ""
 #endif
     );
-    return true;
+    return transport::begin();
 }
 
-bool wifi_up() { return WiFi.status() == WL_CONNECTED; }
+bool ready() { return transport::ready(); }
+
+const char *describe() { return transport::describe(); }
 
 void loop() {
-    if (wifi_up() && !udp_open) {
-        udp_open = udp.begin(GATEWAY_PORT) == 1;  // fixed port: the gateway answers here
-        Serial.printf("[link] Wi-Fi up: %s, gateway %s:%d\n", WiFi.localIP().toString().c_str(),
-                      gateway.toString().c_str(), GATEWAY_PORT);
-    } else if (!wifi_up() && udp_open) {
-        udp.stop();
-        udp_open = false;
-        Serial.println("[link] Wi-Fi down");
-    }
+    transport::loop();
     if (millis() - last_epoch_ms >= EPOCH_MS) {  // the next frame ratchets the key
         roclink_fcnt_next_epoch(&ctr);
         last_epoch_ms += EPOCH_MS;
@@ -201,7 +178,7 @@ static bool deliver(uint8_t *frame, int len, bool ack, const char *what) {
     acked = false;
     for (int attempt = 0; attempt <= RETRIES && !acked; ++attempt) {
         transmit(frame, len);  // a retry is the identical sealed bytes
-        receive_for(ACK_WAIT_MS);
+        receive_for(transport::ack_wait_ms());
         if (!acked && attempt < RETRIES) Serial.printf("[link] %s: no ACK, retrying\n", what);
     }
     if (!acked) {

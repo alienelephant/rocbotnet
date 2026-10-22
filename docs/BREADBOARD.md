@@ -117,6 +117,20 @@ Defaults, in `firmware/include/config.h`:
 
 To override any of them, create `firmware/include/secrets.h`, which is git-ignored, with `#define`s, e.g. your own key from `roclink-rfc/tools/provision.py`.
 
+### The game-box build
+
+`heltec_v3_gamebox` and `heltec_v4_gamebox` build `src/gamebox.cpp` instead of `main.cpp`: the proxy as a scavhunt box's link to the game, for the demo, before rfidauth exists. Same address and key. No card reader is used.
+
+| Input | Does |
+|---|---|
+| PRG, short press | logs in with the dummy fob (`f0b00301` for node `0x0301`): a `START` |
+| PRG, held 1.5 s | logs out: an `END` |
+| [boxlink](BOXLINK.md) frames on the box port (GPIO 39/40), or on the USB port from `tools/boxsim.py` | box data (schemas 32–255) forwarded unchanged; win, fail, hint and end for the logged-in team (BOXLINK.md §9) |
+
+Enter the dummy fob in the game once: `scavhunt team red --token f0b00301`. It checks the link with a `PING` instead of `HELLO`, since `HELLO`'s schema 1 is `WIN` to the game. The display shows each verdict: "Go!", "Locked: solve 0201 first", "Busy", "Solved!", and the serial log shows every frame both ways (`[boxlink] >` and `<`).
+
+To play the box from a computer: `python tools/boxsim.py /dev/ttyUSB0`, then `hello vault 1`, `pack 32 <hfB 2215 48.5 1`, `win`, `hint`. A real box uses the `BoxLink` library in `boxlink/` (`examples/sensor_box`).
+
 ## 4. What you should see
 
 **Serial monitor:**

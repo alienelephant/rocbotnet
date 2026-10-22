@@ -51,7 +51,7 @@ static void draw() {
     const rlink::Stats &s = rlink::stats();
     char l1[24], l2[24], l3[24];
     snprintf(l1, sizeof(l1), "rfidprox %02X/%04X", ROCLINK_NET, ROCLINK_NODE);
-    if (!rlink::wifi_up()) snprintf(l2, sizeof(l2), "Wi-Fi: joining");
+    if (!rlink::ready()) snprintf(l2, sizeof(l2), "Wi-Fi: joining");
     else if (!s.last_ack_ms) snprintf(l2, sizeof(l2), "link: no ACK yet");
     else snprintf(l2, sizeof(l2), "link: ACK %lus ago", (unsigned long)((millis() - s.last_ack_ms) / 1000));
     snprintf(l3, sizeof(l3), "tx %lu ack %lu dl %lu", (unsigned long)s.sent, (unsigned long)s.acked,
@@ -430,7 +430,7 @@ void loop() {
 
     switch (state) {
         case State::joining:
-            if (rlink::wifi_up()) state = State::hello;
+            if (rlink::ready()) state = State::hello;
             break;
         case State::hello: {
             if (hello_retry_ms && millis() - hello_retry_ms < 3000) break;  // don't block the reader
@@ -451,7 +451,7 @@ void loop() {
         }
         case State::idle:
         case State::authorizing:
-            if (!rlink::wifi_up()) {
+            if (!rlink::ready()) {
                 show("Wi-Fi lost", "rejoining");
                 state = State::joining;
                 break;

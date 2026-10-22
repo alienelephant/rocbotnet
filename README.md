@@ -9,7 +9,7 @@ Built for the roclink scavenger hunt, where each puzzle box gets one proxy, but 
 | Document | |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | **Start here.** Architecture, trust model, flows, the proxy's states, the backend's parts, security, what changes elsewhere |
-| [docs/BOXLINK.md](docs/BOXLINK.md) | The UART protocol between a box and its proxy |
+| [docs/BOXLINK.md](docs/BOXLINK.md) | The UART protocol between a box and its proxy; §9 is what the demo runs. The box's library is in [`boxlink/`](boxlink) |
 | [docs/BACKEND.md](docs/BACKEND.md) | The roclink messages between the proxy and the backend, and the rfidauth service |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | Boards, wiring, power, bill of materials |
 | [docs/BREADBOARD.md](docs/BREADBOARD.md) | The breadboard: wiring and pin map, flashing, and watching its traffic on the rfgateway |
