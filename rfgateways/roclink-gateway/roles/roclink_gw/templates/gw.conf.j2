@@ -2,10 +2,13 @@
 gateway_id = {{ gateway_id }}
 state_dir = /var/lib/roclink-gw
 
-mqtt_host = localhost
+mqtt_host = {{ mqtt_host }}
 mqtt_port = {{ mqtt_port }}
 mqtt_user = roclink-gw
 mqtt_password_file = /etc/roclink-gw/mqtt.pass
+{% if mqtt_ca_file %}
+mqtt_ca_file = /etc/roclink-gw/mqtt-ca.crt
+{% endif %}
 
 # LoRa, through lora_pkt_fwd on localhost
 semtech_bind = 127.0.0.1

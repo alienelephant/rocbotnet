@@ -1,0 +1,23 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Beszel agent: this gateway's metrics, for the hub's Beszel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=beszel
+Environment="KEY={{ lookup('file', beszel_hub_key_file) }}"
+Environment=LISTEN={{ beszel_agent_port }}
+Environment=DATA_DIR=/var/lib/beszel-agent
+ExecStart=/usr/local/bin/beszel-agent
+Restart=always
+RestartSec=5
+StateDirectory=beszel-agent
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

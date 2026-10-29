@@ -1,7 +1,9 @@
-# Sets up a roclink LoRa + Wi-Fi gateway with its MQTT broker:
+# Sets up a roclink LoRa + Wi-Fi gateway, publishing to the hub's MQTT broker
+# (mqtt_host; mqtt_local_broker for one of its own):
 #
 #   ansible-playbook site.yml
 #   ansible-playbook site.yml --tags gw      # just rebuild and restart the daemon
+#   ansible-playbook site.yml --tags beszel  # the Beszel agent (after the hub's playbook)
 - name: roclink gateway
   hosts: gateways
   become: true
@@ -11,3 +13,4 @@
     - { role: sx1302, tags: [lora] }
     - { role: roclink_gw, tags: [gw] }
     - { role: node_ap, tags: [ap] }
+    - { role: beszel_agent, tags: [beszel] }

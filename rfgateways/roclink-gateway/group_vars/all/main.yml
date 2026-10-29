@@ -22,9 +22,15 @@ roclink_policies: []         # e.g. ["allow_none = 42:1234", "deny = 42:1235"]
 # roclink's library, from the roclink-rfc repository (rocbotnet/protocol/)
 roclink_src: "{{ playbook_dir }}/../../protocol/roclink-rfc/src"
 
-# --- MQTT
-mqtt_port: 1883
-mqtt_users:                  # name -> password (in the vault)
+# --- MQTT: the hub's broker (infra/roclink-hubhost), which has the users and ACL.
+mqtt_host: 192.168.8.134
+mqtt_port: 8883              # TLS: the hub's broker takes plain MQTT only from itself
+# The hub's CA (its playbook saves it): the broker's certificate must chain to
+# it and name mqtt_host. Empty: plain MQTT.
+mqtt_ca_file: "{{ playbook_dir }}/../../infra/roclink-hubhost/hub-ca.crt"
+mqtt_local_broker: false     # true: run this Pi's own broker, with the users below, and set
+                             # mqtt_host: localhost, mqtt_port: 1883, mqtt_ca_file: ""
+mqtt_users:                  # name -> password (in the vault); roclink-gw's must match the hub's vault
   roclink-gw: "{{ vault_mqtt_roclink_gw }}"
   roclink-hub: "{{ vault_mqtt_roclink_hub }}"
   roclink-ops: "{{ vault_mqtt_roclink_ops }}"
@@ -41,3 +47,12 @@ sx1302_semtech_port: 1700
 # {reset: 23, power_en: 18, sx1261_reset: 22}.
 sx1302_pins:
   reset: 17
+
+# --- time, from the hub (it keeps serving if the internet goes); Debian's pool as fallback
+ntp_server: 192.168.8.134
+
+# --- Beszel agent: the hub's Beszel connects to it on beszel_agent_port with
+# the key the hub's playbook saved (infra/roclink-hubhost/beszel-hub.pub).
+beszel_agent_version: 0.21.1
+beszel_agent_port: 45876
+beszel_hub_key_file: "{{ playbook_dir }}/../../infra/roclink-hubhost/beszel-hub.pub"

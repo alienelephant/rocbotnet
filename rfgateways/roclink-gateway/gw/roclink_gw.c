@@ -181,6 +181,7 @@ typedef struct {
     char mqtt_user[64];
     char mqtt_password[128];
     char mqtt_client_id[64];
+    char mqtt_ca_file[256]; /* set: TLS, and the broker's certificate must chain to this CA and name mqtt_host */
     char semtech_bind[64];
     int semtech_port;
     char udp_bind[64];
@@ -370,7 +371,14 @@ static void on_connect(struct mosquitto *m, void *ud, int rc) {
     snprintf(topic, sizeof(topic), "roclink/out/+/%04x/down", g_cfg.gateway_id);
     mosquitto_subscribe(m, NULL, topic, 1);
     g_mqtt_up = true;
-    LOG_INFO("connected to mqtt %s:%d, listening on %s", g_cfg.mqtt_host, g_cfg.mqtt_port, topic);
+    LOG_INFO("connected to mqtt %s:%d%s, listening on %s", g_cfg.mqtt_host, g_cfg.mqtt_port,
+             *g_cfg.mqtt_ca_file ? " (tls)" : "", topic);
+}
+
+/* libmosquitto's own errors: a TLS handshake that fails says why only here. */
+static void on_mqtt_log(struct mosquitto *m, void *ud, int level, const char *str) {
+    (void)m; (void)ud;
+    if (level & (MOSQ_LOG_ERR | MOSQ_LOG_WARNING)) LOG_WARN("mqtt: %s", str);
 }
 
 static void on_disconnect(struct mosquitto *m, void *ud, int rc) {
@@ -1153,6 +1161,7 @@ static int load_config(const char *path) {
 #define INT(name) else if (!strcmp(k, #name)) g_cfg.name = (int)strtol(v, NULL, 0)
         if (!strcmp(k, "gateway_id")) g_cfg.gateway_id = (uint16_t)strtoul(v, NULL, 0);
         STR(state_dir); STR(mqtt_host); INT(mqtt_port); STR(mqtt_user); STR(mqtt_client_id);
+        STR(mqtt_ca_file);
         STR(semtech_bind); INT(semtech_port); STR(udp_bind); INT(udp_port);
         INT(lora_sf); INT(lora_bw_khz); INT(lora_cr); INT(lora_power); INT(lora_preamble);
         INT(lora_reply_delay_ms);
@@ -1229,6 +1238,16 @@ int main(int argc, char **argv) {
     g_mosq = mosquitto_new(g_cfg.mqtt_client_id, false, NULL); /* persistent session: queued downlink survives */
     if (!g_mosq) return 1;
     if (*g_cfg.mqtt_user) mosquitto_username_pw_set(g_mosq, g_cfg.mqtt_user, g_cfg.mqtt_password);
+    if (*g_cfg.mqtt_ca_file) {
+        /* Verifies the chain and that the certificate names mqtt_host (an IP works, as a SAN). */
+        int rc = mosquitto_tls_set(g_mosq, g_cfg.mqtt_ca_file, NULL, NULL, NULL, NULL);
+        if (rc == MOSQ_ERR_SUCCESS) rc = mosquitto_tls_opts_set(g_mosq, 1, "tlsv1.2", NULL);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            LOG_ERR("mqtt tls with %s: %s", g_cfg.mqtt_ca_file, mosquitto_strerror(rc));
+            return 1;
+        }
+    }
+    mosquitto_log_callback_set(g_mosq, on_mqtt_log);
     mosquitto_connect_callback_set(g_mosq, on_connect);
     mosquitto_disconnect_callback_set(g_mosq, on_disconnect);
     mosquitto_message_callback_set(g_mosq, on_message);

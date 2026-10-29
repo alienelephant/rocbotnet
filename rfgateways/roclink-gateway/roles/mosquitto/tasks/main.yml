@@ -1,0 +1,16 @@
+# The broker is the hub's now (mqtt_host, infra/roclink-hubhost). With
+# mqtt_local_broker true, this gateway runs its own, as it used to.
+- name: Local broker
+  ansible.builtin.include_tasks: local.yml
+  when: mqtt_local_broker | bool
+
+- name: Services
+  ansible.builtin.service_facts:
+  when: not mqtt_local_broker | bool
+
+- name: Local broker off
+  ansible.builtin.service:
+    name: mosquitto
+    state: stopped
+    enabled: false
+  when: not mqtt_local_broker | bool and 'mosquitto.service' in ansible_facts.services

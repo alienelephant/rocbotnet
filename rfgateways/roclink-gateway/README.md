@@ -1,6 +1,6 @@
 # roclink gateway
 
-A roclink gateway for a Raspberry Pi with an SX1302 LoRa concentrator HAT, which also serves Wi-Fi nodes over UDP, and an MQTT broker for a hub to connect to. Ansible sets it all up.
+A roclink gateway for a Raspberry Pi with an SX1302 LoRa concentrator HAT, which also serves Wi-Fi nodes over UDP, and publishes to the hub's MQTT broker (`infra/roclink-hubhost`, `mqtt_host`). Ansible sets it all up.
 
 ```
  LoRa nodes (915.0 MHz, SF9/125 kHz, sync word 0x12)          Wi-Fi nodes
@@ -12,17 +12,19 @@ A roclink gateway for a Raspberry Pi with an SX1302 LoRa concentrator HAT, which
  │ reply windows; publishes GATEWAY_INTERFACE.md records                     │
  │        │ roclink/in/<net>/<gw>/up | rejected | down_status                │
  │        │ roclink/out/<net>/<gw>/down                                      │
- │ mosquitto :1883 (passwords + ACL) ◄── a roclink hub connects here         │
- └───────────────────────────────────────────────────────────────────────────┘
+ └────────┼──────────────────────────────────────────────────────────────────┘
+          ▼
+   the hub's mosquitto :8883 (TLS, passwords + ACL), 192.168.8.134
 ```
 
 | Path | What it is |
 |---|---|
 | `gw/roclink_gw.c` | The gateway daemon: C, built on the Pi against roclink's `src/` (from `../../protocol/roclink-rfc`), libmosquitto, cJSON and OpenSSL |
 | `roles/pi_base` | Turns on SPI and I2C (and reboots), installs build tools |
-| `roles/mosquitto` | The broker: no anonymous access, a password per user, roclink's ACL |
+| `roles/mosquitto` | Off by default: the broker is the hub's. With `mqtt_local_broker: true`, the Pi's own: no anonymous access, a password per user, roclink's ACL |
 | `roles/sx1302` | Semtech's HAL and packet forwarder: built from source, patched for boards without a temperature sensor, a one-channel config, a `pinctrl` reset script |
 | `roles/roclink_gw` | Builds, configures and runs `roclink-gw` |
+| `roles/beszel_agent` | Beszel's agent, for the hub's Beszel; it trusts the key in `infra/roclink-hubhost/beszel-hub.pub` |
 | `roles/node_ap` | The Pi's Wi-Fi as the `roclink-nodes` access point for Wi-Fi nodes (`10.42.0.1`): hostapd, DHCP from dnsmasq, firewalled so nodes reach only `roclink-gw`. The Pi's own link is Ethernet. |
 | `tools/test_node.py` | A test node over UDP: sends a frame, checks the gateway's sealed ACK, receives and ACKs any downlink |
 
@@ -41,7 +43,8 @@ ansible-playbook site.yml --tags gw    # rebuild and restart just the daemon
 
 - **Radio.** One multi-SF channel at 915.0 MHz, the private sync word, and no IQ inversion on transmit, to match RadioLib's defaults in roclink's sketches. Replies to an uplink are scheduled on the concentrator's clock, 150 ms after the uplink ends, then back to back.
 - **Networks.** Net `0x42` is secured in master mode with open admission and require-enc, using the **demo master key** (`000102…0f`), so any node provisioned with `tools/provision.py --demo` joins. Net `0xF0` is the open test net of the unsecured sketches. Before real use, put a new master key in the vault (`tools/provision.py --new` in roclink-rfc) and re-provision the nodes. Better still, switch to enrolled mode (SECURITY.md R3), which the daemon doesn't do yet.
-- **MQTT users.** `roclink-gw` (the daemon), `roclink-hub`, `roclink-ops` and `admin` (everything, for debugging). A service is a user named after its `[[route]]`; add it to `mqtt_users`.
+- **MQTT.** The daemon logs in to the hub's broker as `roclink-gw`, over TLS (`mqtt_ca_file`: the hub's CA, `infra/roclink-hubhost/hub-ca.crt`, which the hub's playbook writes). The broker's users and ACL are set up by the hub's playbook (`infra/roclink-hubhost`); `mqtt_users` here matters only with `mqtt_local_broker: true`, except `roclink-gw`'s password, which must match the hub's vault.
+- **Time.** From the hub (`ntp_server`), which keeps serving the LAN when the internet goes.
 - **The HAT.** Waveshare's SX1302 HAT differs from Semtech's CoreCell reference design in two ways. It has no STTS751 temperature sensor, which the stock HAL needs (`roles/sx1302/files/no-temp-sensor.patch` assumes 25 °C instead), and the SX1302 reset is on **GPIO17**, not 23. A CoreCell-style board needs `sx1302_pins: {reset: 23, power_en: 18, sx1261_reset: 22}` instead.
 
 ## Checking it
@@ -54,7 +57,7 @@ python3 tools/test_node.py --gateway 192.168.8.237 --open   # unsecured, net 0xF
 
 # on the Pi
 journalctl -u roclink-gw -u lora_pkt_fwd -f
-mosquitto_sub -u admin -P <password> -t 'roclink/#' -v
+mosquitto_sub -h 192.168.8.134 -u admin -P <password> -t 'roclink/#' -v   # or, on the hub: roclink watch
 ```
 
 A downlink can be queued as the hub would, on `roclink/out/42/ff01/down` as user `roclink-hub`:

@@ -60,6 +60,16 @@
   no_log: true
   notify: Restart roclink-gw
 
+- name: The hub's CA, for MQTT over TLS (run the hub's playbook first)
+  ansible.builtin.copy:
+    src: "{{ mqtt_ca_file }}"
+    dest: /etc/roclink-gw/mqtt-ca.crt
+    owner: root
+    group: roclink-gw
+    mode: "0644"
+  when: mqtt_ca_file | length > 0
+  notify: Restart roclink-gw
+
 - name: Network master keys
   ansible.builtin.copy:
     dest: /etc/roclink-gw/net-{{ '%02x' | format(item.id | int(base=16)) }}.key

@@ -1,0 +1,57 @@
+# Beszel's agent: the hub's Beszel (infra/roclink-hubhost) connects to it on
+# beszel_agent_port, and the agent lets in only the hub's key.
+- name: The hub's key exists (run the hub's playbook, --tags beszel, first)
+  ansible.builtin.assert:
+    that: lookup('file', beszel_hub_key_file, errors='ignore') | default('', true) | length > 0
+    fail_msg: no {{ beszel_hub_key_file }}; run infra/roclink-hubhost's site.yml --tags beszel first
+
+- name: System user
+  ansible.builtin.user:
+    name: beszel
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Release
+  ansible.builtin.get_url:
+    url: https://github.com/henrygd/beszel/releases/download/v{{ beszel_agent_version }}/beszel-agent_linux_{{ beszel_arch }}.tar.gz
+    checksum: sha256:https://github.com/henrygd/beszel/releases/download/v{{ beszel_agent_version }}/beszel_{{ beszel_agent_version }}_checksums.txt
+    dest: /opt/beszel-agent-{{ beszel_agent_version }}.tar.gz
+    mode: "0644"
+  vars:
+    beszel_arch: "{{ {'aarch64': 'arm64', 'armv7l': 'arm', 'x86_64': 'amd64'}[ansible_facts.architecture] }}"
+
+- name: Directory
+  ansible.builtin.file:
+    path: /opt/beszel-agent-{{ beszel_agent_version }}
+    state: directory
+    mode: "0755"
+
+- name: Unpacked
+  ansible.builtin.unarchive:
+    src: /opt/beszel-agent-{{ beszel_agent_version }}.tar.gz
+    dest: /opt/beszel-agent-{{ beszel_agent_version }}
+    remote_src: true
+    creates: /opt/beszel-agent-{{ beszel_agent_version }}/beszel-agent
+
+- name: Installed
+  ansible.builtin.copy:
+    src: /opt/beszel-agent-{{ beszel_agent_version }}/beszel-agent
+    dest: /usr/local/bin/beszel-agent
+    remote_src: true
+    mode: "0755"
+  notify: Restart beszel-agent
+
+- name: Service
+  ansible.builtin.template:
+    src: beszel-agent.service.j2
+    dest: /etc/systemd/system/beszel-agent.service
+    mode: "0644"
+  notify: Restart beszel-agent
+
+- name: Enabled and running
+  ansible.builtin.systemd:
+    name: beszel-agent
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -32,3 +32,28 @@
     name: [build-essential, git, libmosquitto-dev, libcjson-dev, libssl-dev, i2c-tools]
     update_cache: true
     cache_valid_time: 86400
+
+- name: timesyncd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/timesyncd.conf.d
+    state: directory
+    mode: "0755"
+  when: ntp_server | default('') | length > 0
+
+- name: Time from the hub
+  ansible.builtin.copy:
+    dest: /etc/systemd/timesyncd.conf.d/roclink.conf
+    content: |
+      # Managed by Ansible (rfgateways/roclink-gateway)
+      [Time]
+      NTP={{ ntp_server }}
+      FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org
+    mode: "0644"
+  when: ntp_server | default('') | length > 0
+  register: timesyncd
+
+- name: timesyncd picks it up
+  ansible.builtin.service:
+    name: systemd-timesyncd
+    state: restarted
+  when: timesyncd is changed

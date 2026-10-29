@@ -36,22 +36,24 @@ A device that was refused before a password change keeps offering the old one: f
 
 ## Watching MQTT
 
-On the Pi:
+The broker is the hub's (192.168.8.134; `roclink watch` on the hub does this for you). From the Pi or any machine on the LAN:
 
 ```bash
-mosquitto_sub -h localhost -u admin -P 'PASSWORD' -t 'roclink/#' -v
+mosquitto_sub -h 192.168.8.134 -p 8883 --cafile infra/roclink-hubhost/hub-ca.crt \
+  -u admin -P 'PASSWORD' -t 'roclink/#' -v
 ```
 
+- The broker takes only TLS from the LAN, on `8883`. `--cafile` is the hub's CA, from the repository root (on the Pi: `/etc/roclink-gw/mqtt-ca.crt`).
 - `-t 'roclink/#'` subscribes to every topic under `roclink/`. `-v` prints each message's topic before it.
 - Keep the password on one line inside the quotes. A line break inside them becomes part of the password, and the broker refuses the login.
 - Messages aren't retained: you see only what's published while you're subscribed.
 
-From another machine on the LAN, use the same command with `-h 192.168.8.237`. It needs the mosquitto clients: `sudo pacman -S mosquitto` on Arch, `sudo apt install mosquitto-clients` on Debian. For a GUI, MQTT Explorer can connect to `192.168.8.237:1883` as `admin`.
+It needs the mosquitto clients: `sudo pacman -S mosquitto` on Arch, `sudo apt install mosquitto-clients` on Debian. For a GUI, MQTT Explorer can connect to `192.168.8.134:8883` as `admin`, with encryption on and `hub-ca.crt` as the CA.
 
 To pretty-print the JSON (`sudo apt install jq` first):
 
 ```bash
-mosquitto_sub -h localhost -u admin -P 'PASSWORD' -t 'roclink/in/#' | jq .
+mosquitto_sub -h 192.168.8.134 -u admin -P 'PASSWORD' -t 'roclink/in/#' | jq .
 ```
 
 ### Topics
@@ -86,7 +88,7 @@ journalctl -u roclink-gw -u lora_pkt_fwd -f    # both, interleaved
 journalctl -u roclink-gw --since "-10min"      # the last 10 minutes
 ```
 
-The service names are `roclink-gw`, `lora_pkt_fwd` and `mosquitto`. `journalctl -u` and `-t` with a misspelled name show nothing and don't warn.
+The service names are `roclink-gw` and `lora_pkt_fwd` (and `mosquitto`, only with `mqtt_local_broker: true`). `journalctl -u` and `-t` with a misspelled name show nothing and don't warn.
 
 A healthy daemon logs one line per uplink:
 
@@ -97,7 +99,7 @@ A healthy daemon logs one line per uplink:
 Drops aren't logged at `info`, only published on `.../rejected`. To log them too, add `-v` to `ExecStart` in `/etc/systemd/system/roclink-gw.service`; ansible puts it back on the next run.
 
 ```bash
-systemctl status roclink-gw lora_pkt_fwd mosquitto
+systemctl status roclink-gw lora_pkt_fwd
 sudo systemctl restart roclink-gw
 ```
 
@@ -115,11 +117,11 @@ It uses node address `7E57` by default (`--node HEX` to change it), and keeps it
 
 ### Queuing a downlink by hand
 
-As the hub would, on the Pi:
+As the hub would, from any machine on the LAN:
 
 ```bash
 EXP=$(( $(date +%s%3N) + 60000 ))   # gives up after a minute
-mosquitto_pub -h localhost -u roclink-hub -P 'HUB_PASSWORD' -q 1 -t roclink/out/42/ff01/down \
+mosquitto_pub -h 192.168.8.134 -u roclink-hub -P 'HUB_PASSWORD' -q 1 -t roclink/out/42/ff01/down \
   -m "{\"v\":1,\"id\":\"t1\",\"node\":\"0x7E57\",\"schema\":10,\"seq\":77,\"ack\":true,\"payload\":\"0102\",\"send\":\"window\",\"binding\":null,\"expires\":$EXP}"
 ```
 
