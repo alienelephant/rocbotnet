@@ -1,17 +1,13 @@
 // rfidprox, breadboard firmware for a Heltec WiFi LoRa 32 V3 or V4 (docs/BREADBOARD.md).
 //
 // Joins the rfgateway's Wi-Fi as roclink node 0x0301, says HELLO, keeps the
-// link checked with PINGs, and sends an AUTH_REQ for every card tapped on the
-// RC522 (BACKEND.md section 1). With no backend yet, the AUTH_REQ is ACKed by
+// link checked with PINGs, and sends an AUTH_REQ for every 125 kHz tag held to
+// the RDM6300 (BACKEND.md section 1). With no backend yet, the AUTH_REQ is ACKed by
 // the gateway and published on MQTT, but no GRANT comes back: the display says
 // so. When rfidauth exists, a GRANT shows the user's label.
 //
 // Not here yet: the session state machine, boxlink, LoRa (PLAN_WIFI_EXAMPLE.md).
 #include <Arduino.h>
-#include <MFRC522DriverPinSimple.h>
-#include <MFRC522DriverSPI.h>
-#include <MFRC522v2.h>
-#include <SPI.h>
 #include <U8g2lib.h>
 #include <Wire.h>
 
@@ -20,18 +16,14 @@
 #include "messages.h"
 
 // --- hardware
-static SPIClass rfid_spi(HSPI);  // its own bus: the LoRa radio has the other one
-static MFRC522DriverPinSimple rfid_ss(PIN_RC522_SS);
-static MFRC522DriverSPI rfid_driver{rfid_ss, rfid_spi, SPISettings(RC522_SPI_HZ, MSBFIRST, SPI_MODE0)};
-static MFRC522 rfid{rfid_driver};
+static HardwareSerial &reader = Serial2;  // UART2: UART1 is the box's (gamebox.cpp)
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, PIN_OLED_RST, PIN_OLED_SCL, PIN_OLED_SDA);
-static bool reader_ok;
 
 // --- state
 enum class State { joining, hello, idle, authorizing };
 static State state = State::joining;
 static uint32_t last_ping_ms, auth_sent_ms, last_card_ms;
-static uint8_t last_uid[10], last_uid_len, req_id;
+static uint8_t last_tag[5], req_id;
 static char headline[22] = "Starting";
 static char detail[22] = "";
 
@@ -65,7 +57,7 @@ static void draw() {
     oled.setFont(u8g2_font_7x13B_tf);
     oled.drawStr(0, 49, headline);
     oled.setFont(u8g2_font_6x10_tf);
-    oled.drawStr(0, 62, reader_ok ? detail : "RC522 not found");
+    oled.drawStr(0, 62, detail);
     oled.sendBuffer();
 }
 
@@ -98,293 +90,122 @@ static void on_downlink(uint8_t schema, const uint8_t *p, size_t len) {
 
 // -------------------------------------------------------------------- reader
 
-#include <MFRC522Debug.h>
+// The RDM6300 reads 125 kHz EM4100 tags and sends each one it sees as a frame
+// on its TX line, 9600 8N1, again and again while the tag stays in the field:
+//   0x02 | 10 hex digits: the tag's 5 bytes | 2 hex digits: their XOR | 0x03
+// It sends nothing without a tag, so there's no way to ask whether it's there.
 
-// RC522 diagnostics (RC522_DEBUG in config.h): what the reader sees on every
-// poll, not just successful reads, summarised every RC522_REPORT_MS.
-static uint32_t dbg_polls, dbg_silent, dbg_answers, dbg_other, dbg_select_fail, dbg_last_report;
-static uint8_t dbg_last_version;
+// Diagnostics (RDM6300_DEBUG in config.h): what arrived on the reader's UART,
+// summarised every RDM6300_REPORT_MS.
+static uint32_t dbg_bytes, dbg_frames, dbg_bad, dbg_last_report;
 
-static uint8_t reg(MFRC522Constants::PCD_Register r) { return rfid_driver.PCD_ReadRegister(r); }
-
-static const char *version_name(uint8_t v) {
-    switch (v) {
-        case 0x91: return "MFRC522 v1.0";
-        case 0x92: return "MFRC522 v2.0";
-        case 0x88: return "FM17522 clone";
-        case 0x12: return "counterfeit chip";
-        case 0xB2: return "FM17522 clone";
-        case 0x00: case 0xFF: return "NO ANSWER on SPI";
-        default: return "unknown chip";
-    }
+static int hex_digit(uint8_t c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
 }
 
-// Can the chip be written to, and has it finished its reset? Reads alone can
-// succeed when it can't: a chip whose oscillator isn't running (no power on
-// its 3.3V pin, no GND, a dead crystal) still answers fixed values like the
-// version register, but ignores writes, so the antenna never turns on.
-static void reader_probe() {
-    using R = MFRC522Constants::PCD_Register;
-    uint8_t cmd = reg(R::CommandReg), s1 = reg(R::Status1Reg), s2 = reg(R::Status2Reg);
-    uint8_t err = reg(R::ErrorReg), rf = reg(R::RFCfgReg), tx = reg(R::TxControlReg);
-    Serial.printf("[rc522] registers: Command 0x%02X (PowerDown %s, command 0x%X), Status1 0x%02X, "
-                  "Status2 0x%02X, Error 0x%02X, RFCfg 0x%02X, TxControl 0x%02X\n",
-                  cmd, (cmd & 0x10) ? "ON" : "off", cmd & 0x0F, s1, s2, err, rf, tx);
-
-    // Write two patterns to a plain read/write register and read them back.
-    const uint8_t keep = reg(R::TReloadRegL);
-    bool writes = true;
-    for (uint8_t pattern : {0x5A, 0xA5}) {
-        rfid_driver.PCD_WriteRegister(R::TReloadRegL, pattern);
-        uint8_t back = reg(R::TReloadRegL);
-        Serial.printf("[rc522] write test: wrote 0x%02X, read back 0x%02X: %s\n", pattern, back,
-                      back == pattern ? "ok" : "FAILED");
-        writes = writes && back == pattern;
-    }
-    rfid_driver.PCD_WriteRegister(R::TReloadRegL, keep);
-
-    if (!writes && ((cmd & 0x10) || (cmd & 0x0F) == 0x0F)) {
-        Serial.println("[rc522] VERDICT: the chip is stuck in reset (its oscillator isn't running), so it "
-                       "ignores writes and the antenna stays off. Check, with the power on: 3.3 V at the "
-                       "module's 3.3V pin (measure it), its GND, then the 27.12 MHz crystal on the module.");
-    } else if (!writes) {
-        Serial.println("[rc522] VERDICT: reads work but writes don't reach the chip. Check the MOSI and SCK "
-                       "wires (J3-17, J3-16), and the module's 3.3 V and GND: a module powered only through "
-                       "its signal lines behaves like this.");
-    } else if ((tx & 0x03) != 0x03) {
-        Serial.println("[rc522] VERDICT: writes work but the antenna driver is off. Turning it on again.");
-    } else {
-        Serial.println("[rc522] VERDICT: the chip is written to and its antenna is on.");
-    }
-}
-
-// The chip's settings after a reset are TxControl 0x80 and RFCfg 0x48. Seeing
-// them after init means it reset itself since: almost always its 3.3 V
-// supply dipping when the antenna (its biggest load) turned on.
-static bool reader_was_reset() {
-    using R = MFRC522Constants::PCD_Register;
-    return reg(R::TxControlReg) == 0x80 && reg(R::RFCfgReg) == 0x48;
-}
-
-static uint32_t dbg_resets;
-
-// Antenna drive levels, strongest first. A module whose supply can't take the
-// antenna's full current resets the moment it turns on; a weaker drive draws
-// less, at the cost of range. GsN/CWGsP/ModGsP are the driver conductances
-// (power-on values 0x88/0x20/0x20); TX is which antenna pins drive (0x03 both,
-// 0x01 TX1 only).
-struct Drive {
-    const char *name;
-    uint8_t tx, gsn, cwgsp, modgsp;
-};
-static const Drive DRIVES[] = {
-    {"both antenna pins, full drive", 0x03, 0x88, 0x20, 0x20},
-    {"both antenna pins, reduced drive", 0x03, 0x44, 0x10, 0x10},
-    {"TX1 only, full drive", 0x01, 0x88, 0x20, 0x20},
-    {"TX1 only, reduced drive", 0x01, 0x44, 0x10, 0x10},
-    {"TX1 only, minimum drive", 0x01, 0x22, 0x04, 0x04},
-};
-static constexpr size_t N_DRIVES = sizeof(DRIVES) / sizeof(DRIVES[0]);
-static size_t drive = 0;  // the level in use
-
-static bool try_drive(const Drive &d) {
-    using R = MFRC522Constants::PCD_Register;
-    rfid.PCD_Init();
-    rfid.PCD_AntennaOff();
-    rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);  // 48 dB: the best range
-    rfid_driver.PCD_WriteRegister(R::GsNReg, d.gsn);
-    rfid_driver.PCD_WriteRegister(R::CWGsPReg, d.cwgsp);
-    rfid_driver.PCD_WriteRegister(R::ModGsPReg, d.modgsp);
-    uint8_t tx = reg(R::TxControlReg);
-    rfid_driver.PCD_WriteRegister(R::TxControlReg, (uint8_t)((tx & ~0x03) | d.tx));
-    delay(50);  // a supply that sags under the antenna's load resets the chip within this
-    tx = reg(R::TxControlReg);
-    return (tx & 0x03) == d.tx && rfid.PCD_GetAntennaGain() == MFRC522Constants::RxGain_max;
-}
-
-// Initialise and turn the antenna on at the strongest drive level that
-// doesn't reset the chip, starting from the level last in use.
-static bool reader_configure() {
-    for (size_t i = drive; i < N_DRIVES; ++i) {
-        if (try_drive(DRIVES[i])) {
-            if (i != drive || dbg_resets)
-                Serial.printf("[rc522] antenna ON at level %u: %s%s\n", (unsigned)i + 1, DRIVES[i].name,
-                              i ? " (shorter range: hold cards flat on the antenna)" : "");
-            else
-                Serial.printf("[rc522] antenna ON: %s, receiver gain max\n", DRIVES[i].name);
-            drive = i;
-            return true;
+// Checks a frame's 12 digits (between 0x02 and 0x03) and decodes the tag.
+static bool decode_frame(const uint8_t *digits, uint8_t *tag) {
+    uint8_t sum = 0;
+    for (int i = 0; i < 6; ++i) {
+        int hi = hex_digit(digits[2 * i]), lo = hex_digit(digits[2 * i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        uint8_t b = (uint8_t)(hi << 4 | lo);
+        if (i < 5) {
+            tag[i] = b;
+            sum ^= b;
+        } else if (b != sum) {
+            return false;
         }
-        dbg_resets++;
-        Serial.printf("[rc522] level %u (%s): the chip RESET when the antenna turned on%s\n",
-                      (unsigned)i + 1, DRIVES[i].name, i + 1 < N_DRIVES ? "; trying a weaker drive" : "");
     }
-    Serial.println("[rc522] VERDICT: the chip resets even at the weakest antenna drive, so its supply can't "
-                   "run the antenna at all. Power it from J3-2/J3-3 and J3-1 with the shortest wires you "
-                   "have, or from another 3.3 V source with GND shared; else the module is faulty "
-                   "(its self-test fails too).");
-    drive = 0;  // next time, start from the top again
-    return false;
-}
-
-// Separates "resets when the antenna turns on" (its load sags the supply)
-// from "resets anyway" (the RST line, or a supply that can't run the chip at all).
-static void reader_reset_test() {
-    using R = MFRC522Constants::PCD_Register;
-    rfid.PCD_Init();
-    rfid.PCD_AntennaOff();
-    rfid.PCD_SetAntennaGain(MFRC522Constants::RxGain_max);
-    delay(200);
-    uint8_t rf = reg(R::RFCfgReg);
-    bool a_held = (rf & 0x70) == 0x70;
-    Serial.printf("[rc522] stage A, antenna off: gain set to max, 200 ms later RFCfg 0x%02X: %s; "
-                  "RST pin (GPIO%d) reads %s\n", rf, a_held ? "held" : "LOST (the chip reset)",
-                  PIN_RC522_RST, digitalRead(PIN_RC522_RST) ? "high" : "LOW");
-    rfid.PCD_AntennaOn();
-    uint8_t t1, t20, t200;
-    delay(1);
-    t1 = reg(R::TxControlReg);
-    delay(19);
-    t20 = reg(R::TxControlReg);
-    delay(180);
-    t200 = reg(R::TxControlReg);
-    rf = reg(R::RFCfgReg);
-    bool b_held = (t200 & 0x03) == 0x03 && (rf & 0x70) == 0x70;
-    Serial.printf("[rc522] stage B, antenna on: TxControl 0x%02X at 1 ms, 0x%02X at 20 ms, 0x%02X at 200 ms; "
-                  "RFCfg 0x%02X: %s\n", t1, t20, t200, rf, b_held ? "held" : "LOST");
-    if (!a_held)
-        Serial.println("[rc522] RESULT: the chip resets even with its antenna off, so it isn't the antenna's "
-                       "load. Check the RST wire (J2-14 to the module's RST): a loose RST wire resets the chip "
-                       "whenever it floats low. Then the module's 3.3V/GND wiring generally.");
-    else if (!b_held)
-        Serial.println("[rc522] RESULT: the settings hold until the antenna turns on, then the chip resets: "
-                       "its supply sags under the antenna's load. Short, direct 3V3/GND wires (J3-2, J3-1), a "
-                       "10-100 uF capacitor at the module, or another module.");
-    else
-        Serial.println("[rc522] RESULT: the settings held with the antenna on.");
-}
-
-static void reader_begin() {
-    Serial.printf("[rc522] pins: SDA/SS GPIO%d, SCK GPIO%d, MOSI GPIO%d, MISO GPIO%d, RST GPIO%d\n",
-                  PIN_RC522_SS, PIN_RC522_SCK, PIN_RC522_MOSI, PIN_RC522_MISO, PIN_RC522_RST);
-    pinMode(PIN_RC522_RST, OUTPUT);  // hardware reset: low, then high
-    digitalWrite(PIN_RC522_RST, LOW);
-    delay(10);
-    digitalWrite(PIN_RC522_RST, HIGH);
-    delay(50);
-    rfid_spi.begin(PIN_RC522_SCK, PIN_RC522_MISO, PIN_RC522_MOSI, PIN_RC522_SS);
-    rfid.PCD_Init();
-    uint8_t v = reg(MFRC522Constants::VersionReg);
-    dbg_last_version = v;
-    reader_ok = v != 0x00 && v != 0xFF;
-    Serial.printf("[rc522] version register 0x%02X: %s\n", v, version_name(v));
-    if (!reader_ok) {
-        Serial.println("[rc522] NOT FOUND: check the wiring by header pin, and 3.3 V (docs/BREADBOARD.md)");
-        return;
-    }
-#if RC522_DEBUG
-    Serial.printf("[rc522] SPI clock %lu Hz\n", (unsigned long)RC522_SPI_HZ);
-    reader_probe();
-    // The chip's own self-test (it resets the chip, so initialise again after).
-    // Genuine NXP chips pass; many clones fail it and still read cards fine.
-    bool self_test = rfid.PCD_PerformSelfTest();
-    Serial.printf("[rc522] self-test: %s\n",
-                  self_test ? "PASS" : "FAIL (normal for many clones; not conclusive on its own)");
-    reader_reset_test();
-#endif
-    reader_configure();
-}
-
-// One poll: asks any card in the field to answer (REQA). Returns true with a
-// card's UID, ATQA and SAK. Each tap counts once: a read card is halted until
-// it leaves the field.
-static bool read_card(uint8_t *uid, uint8_t *uid_len, uint16_t *atqa, uint8_t *sak) {
-    byte buf[2];
-    byte size = sizeof(buf);
-    dbg_polls++;
-    auto st = rfid.PICC_RequestA(buf, &size);
-    if (st == MFRC522Constants::STATUS_TIMEOUT) {  // nothing answered: no card in the field
-        dbg_silent++;
-        return false;
-    }
-    if (st != MFRC522Constants::STATUS_OK && st != MFRC522Constants::STATUS_COLLISION) {
-        // Something answered, but garbled: a card at the edge of the field, a weak
-        // antenna, or noise. Worth seeing every time.
-        dbg_other++;
-#if RC522_DEBUG
-        Serial.printf("[rc522] REQA answered with an error: %s\n",
-                      (const char *)MFRC522Debug::GetStatusCodeName(st));
-#endif
-        return false;
-    }
-    dbg_answers++;
-    *atqa = (uint16_t)(buf[0] | buf[1] << 8);
-#if RC522_DEBUG
-    Serial.printf("[rc522] a card answered REQA: ATQA %04X%s; reading its UID\n", *atqa,
-                  st == MFRC522Constants::STATUS_COLLISION ? " (several cards: collision)" : "");
-#endif
-    auto sel = rfid.PICC_Select(&rfid.uid, 0);
-    if (sel != MFRC522Constants::STATUS_OK) {
-        dbg_select_fail++;
-#if RC522_DEBUG
-        Serial.printf("[rc522] UID read (anticollision/select) failed: %s. Hold the card still and flat.\n",
-                      (const char *)MFRC522Debug::GetStatusCodeName(sel));
-#endif
-        return false;
-    }
-    *sak = rfid.uid.sak;
-    *uid_len = rfid.uid.size;
-    memcpy(uid, rfid.uid.uidByte, rfid.uid.size);
-    rfid.PICC_HaltA();
     return true;
 }
 
-// Every RC522_REPORT_MS: what the reader saw, and whether it still answers on SPI.
+// The reader's TX idles high, so through the divider GPIO4 should sit at 3.3 V.
+// A weak pull-down makes a line that isn't driven read low instead of floating.
+static bool reader_line_high() { return digitalRead(PIN_RDM6300_RX) == HIGH; }
+
+static const char *line_verdict(bool high) {
+    return high ? "HIGH: the reader is powered and its TX reaches GPIO4"
+                : "LOW: nothing drives it. Check the reader's 5 V and GND, which header pin is TX, and the "
+                  "10 kOhm from TX to the divider (docs/BREADBOARD.md 6)";
+}
+
+static void reader_begin() {
+    Serial.printf("[rdm6300] TX to GPIO%d (through the 5 V to 3.3 V divider), %d baud\n", PIN_RDM6300_RX,
+                  RDM6300_BAUD);
+    reader.begin(RDM6300_BAUD, SERIAL_8N1, PIN_RDM6300_RX, -1);
+    gpio_pullup_dis((gpio_num_t)PIN_RDM6300_RX);  // the UART driver may have enabled one
+    gpio_pulldown_en((gpio_num_t)PIN_RDM6300_RX);
+    delay(5);
+    Serial.printf("[rdm6300] TX line %s\n", line_verdict(reader_line_high()));
+}
+
+// Reads what's waiting on the UART. Returns true with a tag's 5 bytes once a
+// whole frame with a good checksum has arrived.
+static bool read_card(uint8_t *tag) {
+    static uint8_t frame[12];
+    static int pos = -1;  // -1: waiting for 0x02
+    while (reader.available()) {
+        uint8_t c = (uint8_t)reader.read();
+        dbg_bytes++;
+        if (c == 0x02) {  // a frame starts, even in the middle of a broken one
+            pos = 0;
+        } else if (pos < 0) {
+            continue;  // between frames: some modules add CR LF
+        } else if (pos < (int)sizeof(frame)) {
+            frame[pos++] = c;
+        } else {
+            bool ok = c == 0x03 && decode_frame(frame, tag);
+            pos = -1;
+            if (ok) {
+                dbg_frames++;
+                return true;
+            }
+            dbg_bad++;
+#if RDM6300_DEBUG
+            Serial.printf("[rdm6300] bad frame: %.12s (end byte 0x%02X)\n", (const char *)frame, c);
+#endif
+        }
+    }
+    return false;
+}
+
+// Every RDM6300_REPORT_MS: what the reader sent or, with nothing, the TX line's level.
 static void reader_report() {
-#if RC522_DEBUG
-    if (millis() - dbg_last_report < RC522_REPORT_MS) return;
+#if RDM6300_DEBUG
+    if (millis() - dbg_last_report < RDM6300_REPORT_MS) return;
     dbg_last_report = millis();
-    uint8_t v = reg(MFRC522Constants::VersionReg);
-    uint8_t tx = reg(MFRC522Constants::TxControlReg);
-    Serial.printf("[rc522] last %lus: %lu polls, %lu silent, %lu card answers, %lu UID failures, "
-                  "%lu errors | version 0x%02X%s, antenna %s | link: %s\n",
-                  (unsigned long)(RC522_REPORT_MS / 1000), (unsigned long)dbg_polls,
-                  (unsigned long)dbg_silent, (unsigned long)dbg_answers,
-                  (unsigned long)dbg_select_fail, (unsigned long)dbg_other, v,
-                  v != dbg_last_version ? " (CHANGED: loose wire?)" : "",
-                  (tx & 0x03) == DRIVES[drive].tx ? "on" : "OFF",
+    if (!dbg_bytes) {
+        Serial.printf("[rdm6300] last %lus: no bytes (normal without a 125 kHz tag); TX line %s\n",
+                      (unsigned long)(RDM6300_REPORT_MS / 1000), line_verdict(reader_line_high()));
+        return;
+    }
+    Serial.printf("[rdm6300] last %lus: %lu bytes, %lu tag frames, %lu bad frames | link: %s\n",
+                  (unsigned long)(RDM6300_REPORT_MS / 1000), (unsigned long)dbg_bytes,
+                  (unsigned long)dbg_frames, (unsigned long)dbg_bad,
                   state == State::joining ? "joining Wi-Fi" : state == State::hello ? "waiting for HELLO ACK"
                   : state == State::idle ? "ready" : "waiting for GRANT");
-    if (reader_ok && (tx & 0x03) != DRIVES[drive].tx) {
-        Serial.printf("[rc522] the antenna is off again%s: initialising the chip again (%lu resets so far)\n",
-                      reader_was_reset() ? " and its settings are back to power-on values (it RESET)" : "",
-                      (unsigned long)++dbg_resets);
-        if (drive + 1 < N_DRIVES) drive++;  // it reset at this level while in use: go weaker
-        reader_configure();
-    }
-    if (!reader_ok && v != 0x00 && v != 0xFF) {
-        Serial.println("[rc522] the reader answers now: initialising it again");
-        reader_begin();
-    }
-    if (reader_ok && dbg_polls == 0) Serial.println("[rc522] NOT POLLED: the loop isn't reaching the reader");
-    dbg_last_version = v;
-    dbg_polls = dbg_silent = dbg_answers = dbg_other = dbg_select_fail = 0;
+    dbg_bytes = dbg_frames = dbg_bad = 0;
 #endif
 }
 
 static void on_card() {
-    uint8_t uid[10], uid_len, sak;
-    uint16_t atqa;
-    if (!read_card(uid, &uid_len, &atqa, &sak)) return;
-    bool same = uid_len == last_uid_len && !memcmp(uid, last_uid, uid_len);
-    if (same && millis() - last_card_ms < SAME_CARD_MS) return;
+    uint8_t tag[5];
+    if (!read_card(tag)) return;
+    // The reader repeats a tag while it's held: it counts once, until it has
+    // been away for SAME_CARD_MS.
+    bool same = !memcmp(tag, last_tag, sizeof(tag)) && millis() - last_card_ms < SAME_CARD_MS;
     last_card_ms = millis();
-    memcpy(last_uid, uid, uid_len);
-    last_uid_len = uid_len;
+    if (same) return;
+    memcpy(last_tag, tag, sizeof(tag));
 
-    char hex[21];
-    for (uint8_t i = 0; i < uid_len; ++i) snprintf(hex + 2 * i, 3, "%02X", uid[i]);
-    Serial.printf("[rc522] card %s (ATQA %04X, SAK %02X)\n", hex, atqa, sak);
+    char hex[11];
+    for (uint8_t i = 0; i < sizeof(tag); ++i) snprintf(hex + 2 * i, 3, "%02X", tag[i]);
+    Serial.printf("[rdm6300] tag %s (EM4100: id %lu)\n", hex,
+                  (unsigned long)((uint32_t)tag[1] << 24 | tag[2] << 16 | tag[3] << 8 | tag[4]));
     beep(2000, 60);
 
     if (state == State::authorizing) return;  // one request at a time
@@ -393,7 +214,8 @@ static void on_card() {
         return;
     }
     uint8_t payload[24];
-    size_t n = msg::auth_req(payload, ++req_id, atqa, sak, uid, uid_len);
+    // A 125 kHz tag has no ATQA or SAK (ISO 14443A's): both 0 (BACKEND.md section 1).
+    size_t n = msg::auth_req(payload, ++req_id, 0, 0, tag, sizeof(tag));
     show("Checking...", hex);
     draw();
     if (rlink::send(msg::AUTH_REQ, payload, n, true)) {
@@ -438,7 +260,7 @@ void loop() {
             size_t n = msg::hello(p, FW_VERSION, msg::RADIO_WIFI_UDP, "");
             if (rlink::send(msg::HELLO, p, n, true)) {
                 Serial.println("[rfidprox] HELLO ACKed: ready");
-                show("Tap a card", "");
+                show("Hold a tag", "");
                 state = State::idle;
                 last_ping_ms = millis();
                 hello_retry_ms = 0;
@@ -471,7 +293,7 @@ void loop() {
     }
     // The reader runs whatever the link is doing: a card tapped while offline is
     // still read and shown (on_card() says "Offline"), just not sent.
-    if (reader_ok) on_card();
+    on_card();
     reader_report();
     draw();
 }

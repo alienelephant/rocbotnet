@@ -1,6 +1,6 @@
-# Breadboard: Heltec V3 or V4 + RC522 on Wi-Fi
+# Breadboard: Heltec V3 or V4 + RDM6300 on Wi-Fi
 
-The first hardware test of rfidprox: the proxy on a breadboard, with no backend. It joins the rfgateway's `roclink-nodes` Wi-Fi as roclink node `42/0301`, says `HELLO`, checks the link with `PING`s, and sends an `AUTH_REQ` for every card tapped. The gateway ACKs and publishes each one; you watch them arrive with `tcpdump` and `tools/watch.py` on the Pi.
+The first hardware test of rfidprox: the proxy on a breadboard, with no backend. It joins the rfgateway's `roclink-nodes` Wi-Fi as roclink node `42/0301`, says `HELLO`, checks the link with `PING`s, and sends an `AUTH_REQ` for every tag held to the reader. The gateway ACKs and publishes each one; you watch them arrive with `tcpdump` and `tools/watch.py` on the Pi.
 
 There's no `rfidauth` yet, so no `GRANT` comes back: after 10 s the display says "No answer · no backend yet". That's the expected result for this stage.
 
@@ -9,8 +9,9 @@ There's no `rfidauth` yet, so no `GRANT` comes back: after 10 s the display says
 | Part | Notes |
 |---|---|
 | Heltec WiFi LoRa 32 **V4** or **V3** | with its LoRa antenna on (the radio isn't used yet, but never power a LoRa board without one) |
-| RC522 module | the common blue board, 13.56 MHz |
-| ISO 14443A cards or fobs | MIFARE Classic 1K, Ultralight or NTAG. 125 kHz fobs don't work. |
+| RDM6300 module | 125 kHz, with its coil antenna; 5 V, a UART at 9600 baud |
+| EM4100 tags | 125 kHz fobs or cards (often grey teardrops marked "125K"). 13.56 MHz cards (MIFARE, NTAG, bank cards, phones) don't work. |
+| 2 resistors, 10 kΩ and 20 kΩ | the divider that brings the RDM6300's 5 V TX down to 3.3 V (1 kΩ and 2 kΩ work too) |
 | Buzzer (optional) | active, or a small passive piezo |
 | Breadboard, jumper wires, USB-C cable | |
 
@@ -23,7 +24,7 @@ Both boards have two 18-pin headers, **J2** and **J3**, numbered 1–18 from the
 | Pin | J2 | J3 |
 |---|---|---|
 | 1 | GND | GND |
-| 2 | 5V | 3V3 |
+| 2 | **5V → RDM6300 +5V** | 3V3 |
 | 3 | Ve (switched 3.3 V) | 3V3 |
 | 4 | Ve (switched 3.3 V) | GPIO37: battery-reading control |
 | 5 | GPIO44 (U0RXD) | GPIO46 (V4: LoRa amplifier) |
@@ -34,29 +35,29 @@ Both boards have two 18-pin headers, **J2** and **J3**, numbered 1–18 from the
 | 10 | GPIO35: LED | GPIO39 (V4: GNSS TX) |
 | 11 | GPIO34 | GPIO38 (V4: GNSS RX) |
 | 12 | GPIO33 | GPIO1: battery voltage |
-| 13 | **GPIO47 → RC522 SDA** | GPIO2 (V4: LoRa amplifier enable) |
-| 14 | **GPIO48 → RC522 RST** | **GPIO3 → buzzer** |
-| 15 | GPIO26 | **GPIO4 → RC522 MISO** |
-| 16 | GPIO21: OLED reset | **GPIO5 → RC522 SCK** |
-| 17 | GPIO20 (V4: USB D+) | **GPIO6 → RC522 MOSI** |
+| 13 | GPIO47 | GPIO2 (V4: LoRa amplifier enable) |
+| 14 | GPIO48 | **GPIO3 → buzzer** |
+| 15 | GPIO26 | **GPIO4 ← RDM6300 TX (through the divider)** |
+| 16 | GPIO21: OLED reset | GPIO5 |
+| 17 | GPIO20 (V4: USB D+) | GPIO6 |
 | 18 | GPIO19 (V4: USB D−) | GPIO7 (V4: LoRa amplifier supply) |
 
 On the V3, GPIO 43/44 carry the USB serial (its CP2102), and GPIO 2, 7, 38–42 and 46 aren't used by the board. Check the silkscreen beside the headers on your board before wiring: it prints the GPIO number at each pin.
 
-### 2.2 The RC522
+### 2.2 The RDM6300
 
-Every signal is 3.3 V. **Power the RC522 from 3V3 (J3-2 or J3-3), never from 5V.**
+The RDM6300 runs on **5 V**, and its TX line swings to 5 V. **The ESP32-S3's pins are 3.3 V only: never wire TX straight to GPIO4.** A divider (10 kΩ from TX to GPIO4, 20 kΩ from GPIO4 to GND) brings it to 3.3 V. Only TX is used: the module sends, and has nothing to be told.
 
-| RC522 pin | Header pin | GPIO | `config.h` |
+| RDM6300 pin | Goes to | GPIO | `config.h` |
 |---|---|---|---|
-| 3.3V | J3-2 (3V3) | | |
-| GND | J3-1 (GND) | | |
-| SDA (chip select) | J2-13 | 47 | `PIN_RC522_SS` |
-| RST | J2-14 | 48 | `PIN_RC522_RST` |
-| MISO | J3-15 | 4 | `PIN_RC522_MISO` |
-| SCK | J3-16 | 5 | `PIN_RC522_SCK` |
-| MOSI | J3-17 | 6 | `PIN_RC522_MOSI` |
-| IRQ | not connected | | |
+| +5V (P1) | J2-2 (5V) | | |
+| GND (P1) | J2-1 (GND) | | |
+| TX (P1) | 10 kΩ, then J3-15; 20 kΩ from J3-15 to GND | 4 | `PIN_RDM6300_RX` |
+| RX (P1) | not connected | | |
+| ANT1, ANT2 (P2) | the coil antenna | | |
+| LED (P3) | optional: an LED and 1 kΩ to GND, lit while a tag is read | | |
+
+J2-2 is the board's USB 5 V: power the board from USB. On a battery alone there is no 5 V there.
 
 | Other | Header pin | GPIO | Notes |
 |---|---|---|---|
@@ -65,26 +66,28 @@ Every signal is 3.3 V. **Power the RC522 from 3V3 (J3-2 or J3-3), never from 5V.
 | LED | on board | 35 | flashes on each transmission |
 
 ```
-   RC522                        Heltec WiFi LoRa 32 V4 / V3
+   RDM6300 (P1)                       Heltec WiFi LoRa 32 V4 / V3
   ┌────────┐
-  │ 3.3V   ├──────────────────── J3-2  3V3
-  │ RST    ├──────────────────── J2-14 GPIO48
-  │ GND    ├──────────────────── J3-1  GND
-  │ IRQ    │  (not connected)
-  │ MISO   ├──────────────────── J3-15 GPIO4
-  │ MOSI   ├──────────────────── J3-17 GPIO6
-  │ SCK    ├──────────────────── J3-16 GPIO5
-  │ SDA    ├──────────────────── J2-13 GPIO47
+  │ TX     ├──[ 10k ]──┬───────────── J3-15 GPIO4
+  │        │           └──[ 20k ]──┐
+  │ RX     │  (not connected)      │
+  │ GND    ├───────────────────────┴─ J2-1  GND
+  │ +5V    ├───────────────────────── J2-2  5V
   └────────┘
-                buzzer + ─────── J3-14 GPIO3     buzzer − ── J2-1 GND
+   P2: ANT1, ANT2 ── the coil
+
+                buzzer + ───────────── J3-14 GPIO3     buzzer − ── J2-1 GND
 ```
+
+The pin names on RDM6300 boards vary by seller: check the silkscreen. P1 is the 5-pin header (TX, RX, NC, GND, +5V on most), P2 the antenna, P3 the LED header. Keep the coil away from the Heltec's LoRa antenna and from metal, and flat to where tags will be held.
 
 ### 2.3 Why these pins
 
 - They are among the GPIOs Heltec recommends for add-ons (1, 2, 4–7, 19, 20, 47, 48), minus those either board uses: on the **V4**, GPIO 2 and 7 control the LoRa radio's power amplifier, 19 and 20 are its USB port, and 1 reads the battery.
 - GPIO 38–42 are free on a V4 only while nothing is plugged into its GNSS connector, and 33–37 belong to the flash and PSRAM: none of them are used.
-- The RC522 has its own SPI bus (the ESP32-S3's second SPI controller); the LoRa radio uses the first, on GPIO 8–14, inside the board.
+- The RDM6300 needs a single input. GPIO 4 isn't a strapping pin, so the reader's TX can't change how the board boots. The firmware reads it with UART2, leaving UART1 for the box.
 - GPIO 3 is a strapping pin (JTAG source selection), which a buzzer can't disturb, so it gets the buzzer, not a signal the reader depends on.
+- GPIO 5, 6, 47 and 48, which the RC522 used, are free again.
 - The box UART, for later, will need two more: GPIO 39 and 40 (J3-10, J3-9) are the likely pair, as long as no GNSS module is fitted to a V4.
 
 ## 3. Build and flash
@@ -137,19 +140,19 @@ To play the box from a computer: `python tools/boxsim.py /dev/ttyUSB0`, then `he
 
 ```
 [rfidprox] firmware 0001, node 42/0301
-[rc522] version register 0x92: found
+[rdm6300] TX to GPIO4 (through the 5 V to 3.3 V divider), 9600 baud
 [link] node 42/0301, epoch 0, joining roclink-nodes (DEMO key)
 [link] Wi-Fi up: 10.42.0.x, gateway 10.42.0.1:3333
 [rfidprox] HELLO ACKed: ready
-[rc522] card 04A1B2C3D4E5F6 (ATQA 0044, SAK 00)
+[rdm6300] tag 0F00A1B2C3 (EM4100: id 10597059)
 [auth] AUTH_REQ 1 sent and ACKed; waiting for a GRANT
 [auth] no GRANT: is rfidauth running? (expected on the breadboard)
 [link] PING: ACKed
 ```
 
-The RC522's version register reads `0x91` or `0x92` on a genuine NXP chip; clones often read `0x88`, `0x12` or `0xB2`, and work the same. `0x00` or `0xFF` means it isn't answering: check the wiring and 3.3 V.
+The tag is the EM4100's 5 bytes: a version or customer byte, then the 32-bit id, which is often printed on the fob in decimal (`10597059` here). The RDM6300 says nothing until a tag is in its field, so there is no "reader found" at start.
 
-**Display:** the node address; the link (how long since the last ACK); counters (frames sent, ACKs, downlinks); then the current message: "Tap a card", "Checking…", "No answer".
+**Display:** the node address; the link (how long since the last ACK); counters (frames sent, ACKs, downlinks); then the current message: "Hold a tag", "Checking…", "No answer".
 
 ## 5. Watching the traffic on the rfgateway
 
@@ -166,7 +169,7 @@ mosquitto_sub -h localhost -u admin -P 'ADMIN_PASSWORD' -t 'roclink/in/#' -v | p
 
 ```
 15:12:37 42/0x0301 seq 5 fcnt 1 [enc] via udp: HELLO: firmware 0001, radio Wi-Fi UDP, box (none)
-15:12:41 42/0x0301 seq 6 fcnt 2 [enc] via udp: AUTH_REQ: req 1, card UID 04A1B2C3D4E5F6 (7 bytes), ATQA 0044, SAK 00, method 0
+15:12:41 42/0x0301 seq 6 fcnt 2 [enc] via udp: AUTH_REQ: req 1, card UID 0F00A1B2C3 (5 bytes), EM4100 125 kHz, method 0
 15:13:07 42/0x0301 seq 7 fcnt 3 [enc] via udp: PING: link check
 ```
 
@@ -207,64 +210,43 @@ journalctl -u roclink-gw -f        # on the Pi
 
 ## 6. Reader diagnostics
 
-With `RC522_DEBUG` on (the default in `config.h`), the serial log shows what the reader does, not just the cards it reads.
-
-**At start:**
+With `RDM6300_DEBUG` on (the default in `config.h`), the serial log shows what arrives on the reader's UART, not just the tags it decodes. At start, and every 5 seconds in which nothing arrived, the level of the TX line on GPIO4:
 
 ```
-[rc522] pins: SDA/SS GPIO47, SCK GPIO5, MOSI GPIO6, MISO GPIO4, RST GPIO48
-[rc522] version register 0x92: MFRC522 v2.0
-[rc522] self-test: PASS
-[rc522] antenna ON (TxControlReg 0x83), receiver gain 0x70 (max 0x70)
+[rdm6300] TX line HIGH: the reader is powered and its TX reaches GPIO4
+[rdm6300] last 5s: no bytes (normal without a 125 kHz tag); TX line HIGH: ...
 ```
 
-Then a register probe: the chip's command and status registers, a write test (two patterns written to a register and read back), and a `VERDICT` line:
+The reader's TX idles high, so GPIO4 sits at 3.3 V; a weak pull-down makes it read LOW when nothing drives it. `LOW` is a wiring or power fault, not a tag problem. Every 5 seconds in which bytes arrived:
 
 ```
-[rc522] registers: Command 0x20 (PowerDown off, command 0x0), Status1 0x21, Status2 0x00, Error 0x00, RFCfg 0x70, TxControl 0x83
-[rc522] write test: wrote 0x5A, read back 0x5A: ok
-[rc522] write test: wrote 0xA5, read back 0xA5: ok
-[rc522] VERDICT: the chip is written to and its antenna is on.
+[rdm6300] last 5s: 588 bytes, 42 tag frames, 0 bad frames | link: ready
 ```
 
-**Every 5 seconds,** a summary of the polls since the last one, a fresh read of the version register (so a loose wire shows), and the link state:
+A frame is `0x02`, ten hex digits (the tag's 5 bytes), two hex digits (their XOR), `0x03`; the module repeats it for as long as the tag stays in the field. One that fails its checksum or doesn't end in `0x03` is shown:
 
 ```
-[rc522] last 5s: 1650 polls, 1650 silent, 0 card answers, 0 UID failures, 0 errors | version 0x92, antenna on | link: ready
-```
-
-**Whenever something answers:**
-
-```
-[rc522] a card answered REQA: ATQA 0004; reading its UID
-[rc522] card 0A1B2C3D (ATQA 0004, SAK 08)
+[rdm6300] bad frame: 0F00A1B2C300 (end byte 0x03)
 ```
 
 | What you see | Means | Do |
 |---|---|---|
-| `version register 0x00` or `0xFF: NO ANSWER on SPI` | The chip isn't on the bus | Check each wire against §2.2 by header pin; MISO and MOSI swapped is the usual one; 3.3 V and GND |
-| The version changes between reports, `(CHANGED: loose wire?)` | A connection comes and goes | Reseat the jumpers; breadboard contacts wear |
-| `antenna OFF`, with `write test … FAILED` | The chip answers reads but ignores writes. Usually it hasn't finished its reset because its oscillator isn't running: **no power on the module's 3.3V pin** (it runs weakly off the signal lines), no GND, or a dead crystal. The `VERDICT` line says which. | Measure the voltage between the module's 3.3V and GND pins with the board on: it should be 3.3 V. Reseat both wires, ideally straight to the board's J3-2 and J3-1. Then check MOSI and SCK. |
-| `the chip RESET itself after the antenna turned on`, or `antenna is off again … it RESET` every 5 s | Writes work, but when the antenna turns on (the module's biggest load, 50–100 mA) its 3.3 V supply dips, the chip browns out and returns to its power-on settings (TxControl `0x80`, RFCfg `0x48`): antenna off, no field, no cards | Power the module straight from J3-2/J3-3 (3V3) and J3-1 (GND) with short wires, not through breadboard rails; add a 10–100 µF capacitor across its 3.3V and GND pins; measure 3.3 V there while it runs. The firmware re-initialises it each time, so cards read once the supply holds. |
-| `level N (…): the chip RESET when the antenna turned on; trying a weaker drive` | The firmware steps down five antenna drive levels (both pins at full drive, down to one pin at minimum) and keeps the first one that doesn't reset the chip. Weaker levels read cards at shorter range. | If it settles on a weak level, improve the module's power as above. If none holds (`VERDICT … even at the weakest antenna drive`), power it from another 3.3 V source, or replace the module. |
-| `antenna OFF`, write test ok, no reset | The antenna driver didn't turn on | Reset the board; if it persists, the module's antenna circuit is suspect |
-| `self-test: FAIL` with version `0x88`, `0x12` or `0xB2` | A clone chip | Normal; carry on with the other checks |
-| Polls but all `silent` while you hold a card on it | Nothing in the field answers | Hold the card flat on the antenna (the coil on the board, not the chip) for a second or two. Check it's a 13.56 MHz ISO 14443A card: 125 kHz fobs (EM4100, often grey teardrops marked "125K") never answer. Try a bank card or a phone with NFC as a known-good tag: either should at least produce `errors` or `card answers`. |
-| `errors` (e.g. `CRC error`, `A buffer is not big enough`) | Something answers but garbled | The card is at the edge of the field, or the module's antenna is weak: hold it closer and still |
-| `card answers` but `UID failures` | A card answered, but its UID read failed | Hold it still and flat; one card at a time |
-| `NOT POLLED` | The loop isn't reaching the reader | Shouldn't happen: report it with the log |
-| `link: joining Wi-Fi` or `waiting for HELLO ACK` | The reader still runs; cards show as "Offline" on the display, and aren't sent | Fix the link separately (§5) |
+| `TX line LOW` | Nothing drives GPIO4: the reader is unpowered, or its TX isn't wired to the divider | Measure 5 V between the module's +5V and GND. Check which P1 pin is TX on your module's silkscreen, and that it goes through the 10 kΩ to the junction row. |
+| `no bytes` with `TX line HIGH` while you hold a tag on the coil | The reader is powered and wired, but reads nothing | Measure 5 V between the module's +5V and GND. Check TX goes to J3-15 through the 10 kΩ resistor (not RX: the pin names are close). Check the coil is plugged into P2. Check it's a 125 kHz tag: 13.56 MHz cards never answer. If the module's LED (P3) lights with a tag, the reader works and the fault is the TX wire or the divider. |
+| `bytes` but every frame `bad`, often with garbage digits | The bytes arrive garbled | The divider's GND is missing, or it's wired the wrong way round (TX straight to GPIO4, 20 kΩ in the wrong place): the pin should read 3.3 V idle. |
+| Some `bad frames` among good ones | Noise, usually a tag at the edge of the field | Hold the tag flat and still on the coil. Harmless: bad frames are dropped and the next good one counts. |
+| Tag frames, but no `tag` line | The tag counted once already | A tag counts once while held, and again after it's been away for 2 s (`SAME_CARD_MS`). |
+| `link: joining Wi-Fi` or `waiting for HELLO ACK` | The reader still runs; tags show as "Offline" on the display, and aren't sent | Fix the link separately (§5) |
 
-To turn the detail off, `#define RC522_DEBUG 0` in `secrets.h`. The RC522's SPI clock is 1 MHz (`RC522_SPI_HZ`), slow enough for breadboard wires.
+To turn the detail off, `#define RDM6300_DEBUG 0` in `secrets.h`.
 
 ## 7. Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| `RC522 not found` on the display | Wiring by header pin (§2.1), especially MISO/MOSI swapped, and 3.3 V. The serial log shows the version register value. |
 | Blank display on a V4 | Vext's polarity: the firmware drives GPIO36 high on a V4 (from the datasheet) and low on a V3. Check you flashed the right environment. |
 | No serial output on a V4 | Its serial is the native USB port: use `-e heltec_v4`, whose build turns USB CDC on. |
-| Card taps do nothing | Hold the card flat against the antenna for a moment. A tap counts once until the card leaves the field. 125 kHz fobs aren't read at all. |
+| Tags do nothing | Hold the tag flat against the coil for a moment. A tag counts once until it has been away 2 s. 13.56 MHz cards aren't read at all. See §6. |
 | `Wi-Fi: joining` forever | `roclink-nodes` reachable? `sudo hostapd_cli -i wlan0 all_sta` on the Pi lists connected stations. |
 | `No gateway` | `roclink-gw` running on the Pi; `tcpdump` shows whether frames arrive. |
 | Frames arrive but no ACK, `DROPPED … replay` | The proxy's frame counter is behind what the gateway stored for 0x0301, e.g. after erasing the board's flash. Give it another node address, or reset the gateway's state for net 0x42 (roclink-gateway `docs/OPERATIONS.md`). |

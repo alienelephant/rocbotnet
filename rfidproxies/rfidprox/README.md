@@ -4,7 +4,7 @@ An RFID authentication proxy for boxes on a roclink network. A person taps a fob
 
 Built for the roclink scavenger hunt, where each puzzle box gets one proxy, but the box can be any device with a UART.
 
-**Status:** design, and a first breadboard firmware (`firmware/`, [docs/BREADBOARD.md](docs/BREADBOARD.md)): a Heltec V3 or V4 with an RC522 sending `HELLO`, `PING` and `AUTH_REQ` to the rfgateway over Wi-Fi. No backend yet.
+**Status:** design, and a first breadboard firmware (`firmware/`, [docs/BREADBOARD.md](docs/BREADBOARD.md)): a Heltec V3 or V4 with an RDM6300 (125 kHz EM4100) sending `HELLO`, `PING` and `AUTH_REQ` to the rfgateway over Wi-Fi. No backend yet.
 
 | Document | |
 |---|---|

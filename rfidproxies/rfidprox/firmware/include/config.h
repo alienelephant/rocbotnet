@@ -47,18 +47,17 @@
 #define ACK_WAIT_MS 700                    // per attempt, over Wi-Fi
 #define RETRIES 2
 #define AUTH_TIMEOUT_MS 10000              // no GRANT by then: "no answer"
-#define SAME_CARD_MS 2000                  // a card held on the reader counts once
+#define SAME_CARD_MS 2000                  // a tag held on the reader counts once, until away this long
 #define EPOCH_MS (24UL * 60UL * 60UL * 1000UL)  // roclink key ratchet: daily
 
-// --- RC522 diagnostics on the serial log: the self-test at start, every
-// non-empty poll result, and a summary every RC522_REPORT_MS (docs/BREADBOARD.md 6).
-#ifndef RC522_DEBUG
-#define RC522_DEBUG 1
+// --- RDM6300 (125 kHz EM4100 reader, a UART). Diagnostics on the serial log:
+// every bad frame, and a summary every RDM6300_REPORT_MS while anything
+// arrives (docs/BREADBOARD.md 6).
+#define RDM6300_BAUD 9600
+#ifndef RDM6300_DEBUG
+#define RDM6300_DEBUG 1
 #endif
-#define RC522_REPORT_MS 5000UL
-#ifndef RC522_SPI_HZ
-#define RC522_SPI_HZ 1000000UL  // 1 MHz: slow enough for breadboard wiring (the chip allows 10 MHz)
-#endif
+#define RDM6300_REPORT_MS 5000UL
 
 #define BOX_BAUD 115200
 
@@ -76,12 +75,8 @@
 // for add-ons that neither board uses: on the V4, GPIO 2 and 7 drive the LoRa
 // front end and 38-42 the GNSS connector.
 #define HAS_OLED 1
-#define PIN_RC522_SS 47    // J2-13
-#define PIN_RC522_RST 48   // J2-14
-#define PIN_RC522_MISO 4   // J3-15
-#define PIN_RC522_SCK 5    // J3-16
-#define PIN_RC522_MOSI 6   // J3-17
-#define PIN_BUZZER 3       // J3-14 (optional)
+#define PIN_RDM6300_RX 4   // J3-15: the RDM6300's TX, through a 5 V to 3.3 V divider
+#define PIN_BUZZER 3      // J3-14 (optional)
 #define PIN_LED 35         // on board (J2-10)
 #define LED_ON HIGH
 #define PIN_TX_LED PIN_LED // flashes on each transmission

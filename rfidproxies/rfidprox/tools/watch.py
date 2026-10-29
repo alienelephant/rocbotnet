@@ -35,7 +35,8 @@ def decode(schema: int, p: bytes) -> str:
         if schema == 2:
             req, method, atqa, sak, n = struct.unpack_from("<BBHBB", p, 1)
             uid = p[7 : 7 + n].hex().upper()
-            return f"req {req}, card UID {uid} ({n} bytes), ATQA {atqa:04X}, SAK {sak:02X}, method {method}"
+            kind = "EM4100 125 kHz" if atqa == 0 and sak == 0 else f"ATQA {atqa:04X}, SAK {sak:02X}"
+            return f"req {req}, card UID {uid} ({n} bytes), {kind}, method {method}"
         if schema in (3, 4):
             session = struct.unpack_from("<H", p, 1)[0]
             extra = f", reason {p[3]}" if schema == 4 and len(p) > 3 else ""

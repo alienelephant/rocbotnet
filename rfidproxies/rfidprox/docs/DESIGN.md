@@ -17,8 +17,8 @@ The box talks to the proxy over a UART with a simple protocol, **boxlink** ([BOX
 
 ```mermaid
 flowchart LR
-    BOX["Box<br/>(any design)"] <-->|"UART: boxlink"| PX["rfidprox<br/>ESP32-S3 + RC522"]
-    FOB(("fob")) -.->|"13.56 MHz"| PX
+    BOX["Box<br/>(any design)"] <-->|"UART: boxlink"| PX["rfidprox<br/>ESP32-S3 + RDM6300"]
+    FOB(("fob")) -.->|"125 kHz"| PX
     PX <-->|"roclink, enc<br/>LoRa / Wi-Fi UDP"| GW["rfgateway<br/>(Pi)"]
     GW <-->|"MQTT"| HUB["roclink hub"]
     HUB <-->|"schemas 1–31"| AUTH["rfidauth service"]
@@ -33,7 +33,7 @@ flowchart LR
 |---|---|
 | **Box** | The external device the proxy serves: a puzzle, a machine, anything with a UART. Untrusted: it can only talk through the proxy, and only during a session. |
 | **Proxy** | An rfidprox device. One proxy serves one box. It is a roclink node, and the backend knows the box by the proxy's roclink address. |
-| **Fob** | An ISO 14443A card or tag (MIFARE Classic, Ultralight, NTAG) read by the RC522. Identified by its UID in v1. |
+| **Fob** | A 125 kHz EM4100 tag or card read by the RDM6300. Identified by its 5-byte ID. |
 | **User** | The person a fob belongs to, as the external auth backend says. |
 | **App** | The backend service that owns a box's behaviour and data, e.g. scavhunt. It decides whether a user may use its box now. |
 | **rfidauth** | The hub service that handles proxies' authentication messages. It asks the external backend who a fob belongs to, and the app whether that user may use the box. |
@@ -245,14 +245,14 @@ The app answers with its own verdict (`verdict`, `arg`) so the proxy can show it
 
 ### 7.4 Room for cryptographic cards
 
-`AUTH_REQ` carries an auth method (0 = UID). A later method (1 = challenge) adds a round: rfidauth sends `CHALLENGE`, the proxy relays it to the card and returns the card's answer in `AUTH_REQ` again. Schema 19 is reserved for `CHALLENGE`. The RC522 can do MIFARE Classic and Ultralight C; NTAG424 or DESFire would likely need a PN532 instead.
+`AUTH_REQ` carries an auth method (0 = UID). A later method (1 = challenge) adds a round: rfidauth sends `CHALLENGE`, the proxy relays it to the card and returns the card's answer in `AUTH_REQ` again. Schema 19 is reserved for `CHALLENGE`. The RDM6300 only reads EM4100 IDs, which have no cryptography: this needs a 13.56 MHz reader (a PN532 for NTAG424 or DESFire).
 
 ## 8. Security notes
 
 | Threat | Mitigation |
 |---|---|
 | Forging or replaying proxy messages over the air | roclink `enc`, per-node keys, frame counters |
-| Copying a fob's UID | Not stopped in v1. A copied fob is that user. Challenge-response cards later (§7.4); revoke the user at the external backend meanwhile. |
+| Copying a fob's UID | Not stopped in v1. A copied fob is that user. EM4100 tags are read from a few cm away and copied with cheap tools. Challenge-response cards later (§7.4); revoke the user at the external backend meanwhile. |
 | A box sending data with no one authorized | The gate (§6.2): nothing leaves the proxy without a session |
 | A box sending data under someone else's session | Not preventable: the box is whatever is attached. Data is attributed to the session holder, and the app can judge it. |
 | A stolen proxy | Its key can speak for that one box. Revoke the node at the gateway (`deny = 42:NODE`) and in `boxes.toml`. |

@@ -11,7 +11,7 @@ The whole rfidprox flow over its first transport: tap a fob, get a grant, open a
 
 ```mermaid
 flowchart LR
-    BS["boxsim<br/>(laptop, USB-UART)"] <-->|"boxlink<br/>3.3 V UART"| PX["rfidprox<br/>Heltec V3 + RC522"]
+    BS["boxsim<br/>(laptop, USB-UART)"] <-->|"boxlink<br/>3.3 V UART"| PX["rfidprox<br/>Heltec V3 + RDM6300"]
     PX <-->|"Wi-Fi: roclink-nodes<br/>UDP 10.42.0.1:3333"| GW
     subgraph PI["rfgateway Pi"]
       AP["AP: roclink-nodes"] --- GW["roclink-gw"]
@@ -74,7 +74,7 @@ A PlatformIO project in `rfidprox/firmware`, Arduino-ESP32 3.x, for the Heltec V
 | `link` | the roclink node: seal, open, frame counter and chain key in NVS, daily ratchet, `PING` heartbeat, retries | roclink-rfc `src/` |
 | `session` | the state machine (DESIGN.md §6.1), the gate, grace buffer, renewals, rate budget | |
 | `boxlink` | framing (COBS, CRC-16), ACKs and retries, control operations | BOXLINK.md |
-| `reader` | RC522 polling, UID and card type, debouncing repeated taps | MFRC522v2 (the maintained library) |
+| `reader` | RDM6300 frames on a UART, checksum, debouncing a held tag | none: the frame format is 14 bytes |
 | `ui` | OLED messages, buzzer, LED | U8g2 |
 | `config` | Wi-Fi credentials, gateway address, node address and key | `secrets.h` (git-ignored) from `provision.py`, demo keys otherwise |
 
@@ -102,7 +102,7 @@ Proposed defaults: node address `0x0301` on net `0x42` (demo master key).
 | 6 | Firmware: boxlink; boxsim | Box DATA refused before a session, forwarded during one; demoapp's echo reaches boxsim |
 | 7 | Endings and failures | Each DESIGN.md §5.5 cause works: box ends it, revoke from demoapp's page, expiry (renewal blocked), AP switched off past grace, boxsim `silent`, proxy reset |
 
-Steps 1–2 and 4 don't need the board; 3 needs only the Heltec; 5 adds the RC522; 6 the UART adapter.
+Steps 1–2 and 4 don't need the board; 3 needs only the Heltec; 5 adds the RDM6300; 6 the UART adapter.
 
 ## 7. Repository changes
 
@@ -117,5 +117,5 @@ Steps 1–2 and 4 don't need the board; 3 needs only the Heltec; 5 adds the RC52
 | Decision | Choice |
 |---|---|
 | Access point | Option C: Ethernet for the Pi, its Wi-Fi as the AP (§2.1). Set up. |
-| RC522 library | MFRC522v2, the maintained one |
+| Card reader | RDM6300 (125 kHz EM4100) on a UART; it replaced the RC522 |
 | Where the hub comes from | A new `roclink-hub` repository, copied from `roclink_/hub`; `roclink_` is left as it is |

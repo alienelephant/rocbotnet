@@ -12,7 +12,7 @@ The proxy is a roclink node of device type `rfidprox`, always-listening, sending
 | Schema | Name | Payload after `ver` | Sent |
 |---|---|---|---|
 | 1 | `HELLO` | `fw_version` u16, `radio` u8 (1 LoRa, 2 Wi-Fi UDP, 3 ESP-NOW, 4 HaLow), `box_type` (length-prefixed, ≤ 16; empty if no box) | At boot and on reconnecting. `ACK_REQ`. |
-| 2 | `AUTH_REQ` | `req` u8, `method` u8 (0 UID), `atqa` u16, `sak` u8, `uid_len` u8, `uid` (4, 7 or 10 bytes) | On a fob tap. `ACK_REQ`. |
+| 2 | `AUTH_REQ` | `req` u8, `method` u8 (0 UID), `atqa` u16, `sak` u8, `uid_len` u8, `uid` (4, 7 or 10 bytes; 5 for a 125 kHz EM4100 tag, whose `atqa` and `sak` are 0) | On a fob tap. `ACK_REQ`. |
 | 3 | `RENEW` | `session` u16 | At two thirds of the lifetime. `ACK_REQ`. |
 | 4 | `SESSION_END` | `session` u16, `reason` u8 (BOXLINK.md §4.2) | When the proxy or the box ends a session. `ACK_REQ`. |
 | 5 | `STATUS` | `state` u8, `session` u16, `box` u8 (0 none, 1 present), `buffered` u8 | Every 5 minutes, and on a state change. |

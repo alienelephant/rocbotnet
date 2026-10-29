@@ -6,16 +6,16 @@
 
 ## 1. Choosing a board
 
-The proxy needs a radio, an RC522 on SPI, a UART to the box, and some way to show the user what happened. Counting pins:
+The proxy needs a radio, an RDM6300 on a UART, a UART to the box, and some way to show the user what happened. Counting pins:
 
 | Part | Pins |
 |---|---|
 | SX1262 | SPI (SCK, MOSI, MISO) + CS, RST, BUSY, DIO1 |
-| RC522 | SPI (shared or its own) + CS, RST (IRQ optional) |
+| RDM6300 | one UART input (its TX) |
 | Box UART | TX, RX |
 | Feedback | LED, buzzer, display |
 
-That's 12–13 GPIOs even with the two SPI devices on one bus. The XIAO ESP32-S3 has 11 (D0–D10).
+That's 8 GPIOs beside the radio's 7. The XIAO ESP32-S3 has 11 (D0–D10).
 
 | Board | Radio | Free GPIOs | For | Against |
 |---|---|---|---|---|
@@ -49,8 +49,8 @@ The pin assignments, with header pins and the full J2/J3 tables, are in [BREADBO
 
 | Part | GPIO | Header pin |
 |---|---|---|
-| RC522 SDA, RST | 47, 48 | J2-13, J2-14 |
-| RC522 MISO, SCK, MOSI | 4, 5, 6 | J3-15, J3-16, J3-17 |
+| RDM6300 TX (through a 5 V to 3.3 V divider) | 4 | J3-15 |
+| RDM6300 +5V, GND | | J2-2, J2-1 |
 | Buzzer | 3 | J3-14 |
 | Box UART TX, RX (later) | 39, 40 | J3-10, J3-9 |
 
@@ -66,7 +66,7 @@ These work on both the **V3** and the **V4**, which is pin-compatible with it. O
 |---|---|---|
 | ESP32-S3, Wi-Fi on | 80 mA | 350 mA |
 | SX1262, 14 dBm transmit | | 45 mA (about 120 mA at 21 dBm) |
-| RC522, field on | 13–26 mA | |
+| RDM6300 (5 V) | about 50 mA | |
 | OLED | 10–20 mA | |
 
 A 5 V, 1 A USB-C supply covers it. The proxy is mains-powered by design (an always-listening node). The box has its own supply (BOXLINK.md §1).
@@ -76,13 +76,14 @@ A 5 V, 1 A USB-C supply covers it. The proxy is mains-powered by design (an alwa
 | Item | Qty | Notes |
 |---|---|---|
 | Heltec WiFi LoRa 32 V3, 863–928 MHz | 1 | with its antenna |
-| RC522 module (13.56 MHz) | 1 | the common blue board; reads MIFARE Classic, Ultralight, NTAG |
-| ISO 14443A fobs or cards | per user | MIFARE Classic 1K or NTAG215. 125 kHz fobs don't work. |
+| RDM6300 module (125 kHz), with its coil | 1 | reads EM4100 tags; 5 V, UART at 9600 baud |
+| 10 kΩ and 20 kΩ resistors | 1 each | the divider on its TX line (BREADBOARD.md §2.2) |
+| EM4100 fobs or cards | per user | 125 kHz. 13.56 MHz cards don't work. |
 | Buzzer | 1 | |
 | JST-XH 3-pin socket and lead | 1 | to the box (BOXLINK.md §1) |
 | USB-C 5 V 1 A supply | 1 | |
-| Enclosure | 1 | the RC522's antenna behind at most a few mm of plastic, away from metal |
+| Enclosure | 1 | the RDM6300's coil behind at most a few mm of plastic, away from metal |
 
-## 5. The RC522 and future cards
+## 5. The RDM6300 and future cards
 
-The RC522 handles ISO 14443A up to MIFARE Classic authentication and Ultralight C. For challenge-response cards later (NTAG424 DNA, DESFire EV2/EV3, DESIGN.md §7.4), its ISO 14443-4 support in Arduino libraries is limited. A PN532 is the likely replacement then: same bus, more pins (IRQ).
+The RDM6300 reads EM4100 tags: a fixed 5-byte ID with no security, easily copied. For challenge-response cards later (NTAG424 DNA, DESFire EV2/EV3, DESIGN.md §7.4), the proxy needs a 13.56 MHz reader instead; a PN532 is the likely one (SPI or I2C, plus IRQ).
