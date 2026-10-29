@@ -3,7 +3,7 @@
     GET /                    a scoreboard page that refreshes itself
     GET /api/run             the current run: state, times, boxes, teams' progress
     GET /api/standings       the current run's standings
-    GET /api/events?after=N  the current run's log, from event N on
+    GET /api/events?after=N  the current run's log, from event N on, without its tokens
     GET /api/box_data        each box's own data (schemas 32-255), decoded by the hub:
                              the latest, and the most recent few. Read from the
                              hub's API ([api] hub_api), if set
@@ -81,6 +81,15 @@ def standings(game: Game, store: Store, now: int | None = None) -> list[dict]:
     return run.standings(now)
 
 
+SECRET_FIELDS = ("token", "tokens")  # who a team is, to a box: whoever has one plays as that team
+
+
+def events(store: Store, run_id: str, after: int = 0) -> list[dict]:
+    """The run's log as the scoreboard may show it: the tokens left out."""
+    return [{k: v for k, v in ev.items() if k not in SECRET_FIELDS}
+            for ev in store.events(run_id, after)]
+
+
 FIRST_BOX_SCHEMA = 32  # below: the game's own messages (GAME.md §6)
 
 
@@ -141,7 +150,7 @@ def serve(game: Game, db_path: str, host: str, port: int, hub_api: str | None = 
                 if url.path == "/api/events":
                     rid = store.current_run_id(game)
                     after = int(parse_qs(url.query).get("after", ["0"])[0])
-                    return self._json(200, store.events(rid, after) if rid else [])
+                    return self._json(200, events(store, rid, after) if rid else [])
                 if url.path == "/api/box_data":
                     return self._json(200, cached_box_data())
                 self._json(404, {"error": "not found"})

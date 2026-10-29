@@ -246,6 +246,10 @@ def test_api_over_http(env, tmp_path):
         assert json.loads(get("/api/standings"))[0]["team"] == "red"
         assert json.loads(get("/api/events?after=3"))[1]["kind"] == "claim"
         assert b"<title>Scoreboard</title>" in get("/")
+        # Tokens are who a team is: the public log never shows them.
+        body = get("/api/events")
+        assert b"token" not in body and RED.hex().encode() not in body and BLUE.hex().encode() not in body
+        assert any(e["kind"] == "team_entered" and e["team"] == "red" for e in json.loads(body))
     finally:
         servers[0].shutdown()
 

@@ -249,7 +249,7 @@ A box that resends a request because its verdict was lost gets the same answer a
 | Walking away to hide box time | a session that times out is charged the full timeout (rule 7) |
 | Holding a box to block other teams | the session timeout, and the operator's reset |
 | Claiming after time | the hub's clock and the deadline (rule 10) |
-| Copying another team's token | Nothing technical; it only gives progress to the other team, and charges it time. Use cards that can't be read at a distance |
+| Copying another team's token | Nothing technical; it only gives progress to the other team, and charges it time. Use cards that can't be read at a distance. The scoreboard and its API never show tokens |
 | Opening a box and triggering its `WIN` by hand | Physical. A box's key can only send that box's messages, and a stolen box can be revoked (roclink `deny` policy) |
 
 ## 8. The backend
