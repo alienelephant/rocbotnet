@@ -23,7 +23,7 @@ The wire format and rules are normative in [PROTOCOL.md §10](PROTOCOL.md#10-sec
 | **A3** | Someone who steals or opens a node | Read that node's flash: its current chain key and counter | **Yes**: limited to that node, and to now and later |
 | **A4** | Someone who steals or controls a gateway host (the Pi) | Everything the gateway can do; read its stored keys | **Partly**: an enrolled-mode gateway reveals no past traffic. A gateway's live powers are trusted. |
 | **A5** | Jammer or flood | Deny service | **No**: radio availability can't be guaranteed by a protocol |
-| **A6** | Whoever runs or breaks into the hub, MQTT broker, database or web server | Read and alter everything forwarded; replay old records; send downlink | **No**: trusted, and reached only over TLS. The hub is also a security control: it enforces replay protection across gateways and is the only source of downlink (PROTOCOL.md §9.1), so protect it at least as well as a gateway. End-to-end payloads, which would cover this, aren't part of 0.3 (PROTOCOL.md §15 item 4). |
+| **A6** | Whoever runs or breaks into the hub, MQTT broker, database or web server | Read and alter everything forwarded; replay old records; send downlink | **No**, for the protocol: trusted, and reached only over TLS. The hub is also a security control: it enforces replay protection across gateways and is the only source of downlink (PROTOCOL.md §9.1), so protect it at least as well as a gateway. End-to-end payloads, which would cover this, aren't part of 0.3 (PROTOCOL.md §15 item 4). This repository's own hub, and where it falls short of this, is [The hub host](#the-hub-host). |
 
 ## What the design does about each threat
 
@@ -91,6 +91,126 @@ The wire format and rules are normative in [PROTOCOL.md §10](PROTOCOL.md#10-sec
 - **The gateway service holds keys and counters:** each node's current chain key in enrolled mode, or the master in master mode. Protect the Pi: file permissions, encryption at rest for the peer store, no shared accounts.
 - **Use TLS and broker authentication** on every link after the gateway.
 - **Transport security underneath** (WPA2, ESP-NOW encryption) is allowed but not relied on. Leaving ESP-NOW encryption off keeps broadcast and "any gateway" working.
+
+## The hub host
+
+This repository's hub runs on one Debian box, set up by `infra/roclink-hubhost` ([ADMIN.md](../../../infra/roclink-hubhost/docs/ADMIN.md)). It runs the MQTT broker, the hub, the scavenger hunt and a Caddy web front, each a rootless podman container of one unprivileged user, `roclink`. Everything after the gateway in the [trust boundary](#trust-boundary) is on this box. A6 is out of scope for the protocol, but this is the thing A6 attacks, so this section covers it: what each service exposes, what protects it, and where it falls short of the rest of this document.
+
+### Who can reach it
+
+| | Who | Reaches |
+|---|---|---|
+| **H1** | Any device on the LAN (`192.168.8.0/24`), which is A2. At a game this includes players' phones, if they're on the same Wi-Fi. | MQTT over TLS on `:8883` (with a password), the public pages on `:80`, the TLS handshakes on `:443` and `:8443`, SSH (with a key), NTP |
+| **H2** | An SSH user (group `ssh-users`: `rocadmin`, `rocuser`) | Everything on `127.0.0.1`, from a shell or by `ssh -L`: the hub's API with no certificate, the broker, Beszel's login page |
+| **H3** | Whoever has an MQTT password | What that user's ACL allows ([Mosquitto](#mosquitto)) |
+| **H4** | Code that breaks out of a container, or runs in the Beszel agent's | The `roclink` user: every container, and its configs (the MQTT passwords) and databases |
+| **H5** | Whoever has the control machine's `pki/` or `.vault-pass` | Admin certificates, server certificates, every password |
+
+The firewall drops everything from outside the LAN. The internet is out of scope as long as the router forwards no ports to the hub.
+
+### Mosquitto
+
+The broker is the hub's real boundary. The hub takes what gateways publish on `roclink/in/` as verified ("gateways verify secured frames before publishing, so these fields can be trusted", hub README), and the services take what the hub delivers. So an MQTT password is worth as much as what its ACL lets it write:
+
+| User | May | Its password lets you |
+|---|---|---|
+| `roclink-gw` | write `roclink/in/#`, read `roclink/out/#` | **publish any node's uplink as verified at level `enc`**, under any gateway's name; read every downlink in plaintext, before a gateway seals it |
+| `roclink-hub` | read `roclink/in/#`; write `roclink/svc/#`, `pub`, `ops` and `out` | deliver anything to any service, and send any downlink to any node |
+| `roclink-ops` | read `roclink/ops/#` | read rejection summaries and alerts |
+| `scavhunt` | read `roclink/svc/scavhunt/#`, write `roclink/svc/scavhunt/down` | read the game's deliveries; send `VERDICT` and `CONTROL` (reset, disable, enable) to the game's boxes, as far as the hub's route allows |
+| `admin` | everything | everything |
+
+**What protects it:**
+- **TLS on the LAN.**
+  - The LAN reaches only `:8883`, which is TLS 1.2 or later, with the hub's certificate from the admin CA.
+  - Gateways check that certificate against the committed `hub-ca.crt`, and check that it names `mqtt_host`.
+  - Plain MQTT (`:1883`) listens on `127.0.0.1` only, for the hub and the game.
+  - So the passwords and the payloads gateways decrypted never cross the LAN in clear, and an on-path H1 can't pose as the broker.
+- No anonymous clients.
+- Passwords are stored hashed (PBKDF2-SHA512).
+- The ACL above.
+- The firewall: only the LAN reaches `:8883`.
+- A read-only container with no capabilities.
+
+**Where the passwords are:**
+- on the broker, hashed;
+- in the hub's and the game's configs under `/srv/roclink/etc/` (readable by `roclink`, so H4);
+- `admin`'s, readable only by root on the box;
+- `roclink-gw`'s on each gateway, in `/etc/roclink-gw/mqtt.pass`;
+- all of them in the hub's and the gateways' Ansible vaults (H5).
+
+**Where it falls short:**
+- **A gateway's password forges any node.**
+  - Whoever has `roclink-gw`'s password can forge any secured node's uplink: from a stolen Pi (A4), or from a vault.
+  - The hub's anti-replay window only asks for a higher `fcnt`, so a forged frame also moves the window past the real node's counter. The node's real frames are then refused as replays for as long as the forged counter stays ahead.
+  - For the game, that's a forged `WIN` for any team at any box.
+  - TLS keeps the password off the wire, not off the Pi. Protect the Pi as R3 asks, and change the password if one is lost ([mqtt-users.md](../../../infra/roclink-hubhost/docs/runbooks/mqtt-users.md)).
+- **No client certificates for gateways.** A gateway proves who it is with its password only.
+- **One user for every gateway.** The ACL doesn't tie `roclink/in/<net>/<gateway>/` to a gateway, so one gateway's password speaks for all of them. Fix: a user per gateway, and `pattern write roclink/in/+/%u/#`.
+- **Connections before login are unlimited.** Anyone on the LAN can open them, and there's no `max_connections`. Flooding is A5, out of scope, but it's cheap here.
+
+### Caddy
+
+| Site | Serves | Who gets in |
+|---|---|---|
+| `http://:80` | the scoreboard (the game's read-only API), and the hub's public API under `/public/` | anyone on the LAN; plain HTTP |
+| `https://:443` | Beszel | a listed admin certificate, then Beszel's own login |
+| `https://:8443` | the hub's read-only API | a listed admin certificate |
+
+**What protects it:**
+- **Two conditions for a certificate.** The admin sites ask for a client certificate. It must be signed by the admin CA *and* be one of the certificates listed in `admin_clients`.
+  - Removing a name from that list revokes its certificate.
+  - A stolen CA key can't mint a certificate that gets in.
+- **The admin CA can only sign for the hub.**
+  - Admins install it in their browsers as a trusted root.
+  - Its name constraints permit only `192.168.8.0/24` and `roclink-hub`, so its key (H5) can't impersonate any other site to those browsers.
+  - The playbook refuses a CA without them.
+- **Caddy's admin API is off.**
+- **The public site can't write.** It proxies to two read-only servers. The public API is a separate process that is only ever given `public.db`, so it can't serve anything from `hub.db`.
+- **The container.** It's read-only, and its only capability is `NET_BIND_SERVICE`.
+
+**Where it falls short:**
+- **The certificate guards the network path, not the services.** The hub's API on `127.0.0.1:8080` has no authentication of its own.
+  - H2 reaches it by `ssh -L`, as ADMIN.md suggests, and so does any process on the box.
+  - `rocuser` may log in over SSH, so once it has a key it can read the hub's API.
+  - Beszel keeps its own login.
+- **The scoreboard republishes admin data.** It reads the game boxes' own data (schema 32 and up) from the hub's API and serves it on `:80`. That's deliberate, but it means a box's own telemetry is public on the LAN. Don't give a game box a schema-32 payload the players shouldn't see.
+- **The CA's key can still impersonate the hub.**
+  - Whoever has `pki/ca.key` (H5) can sign a server certificate for `192.168.8.134` that browsers and gateways accept.
+  - On-path, they could then read admin sessions and gateway traffic.
+  - The admin pages would still refuse them, since those let in only the listed client certificates.
+  - Keep `pki/` with the vault password, off shared machines.
+- **Plain HTTP on `:80`.** An on-path H1 can serve a fake scoreboard. It's only a display: the real standings are in `game.db`, and each box shows its own verdicts.
+- **Every local user can bind ports from 80 up** (`net.ipv4.ip_unprivileged_port_start = 80`). While Caddy is down, any local process can take `:80` and serve its own page. It can't serve the admin sites without the server key, which only `roclink` can read.
+
+### The scavenger hunt
+
+The game takes input in three ways:
+- the hub's deliveries on `roclink/svc/scavhunt/up`;
+- operator commands, given only on the box (`roclink scavhunt ...`, through sudo);
+- GET requests to its scoreboard, through Caddy's `:80`.
+
+It has no network interface for operators.
+
+**What protects it:**
+- **Game messages must be secured.** They're accepted only at level `enc` (`allow_insecure = false`), and only from addresses that are boxes in `game.toml`.
+- **Repeats are dropped.** Each uplink is handled once, by `(net, src, key_gen, fcnt)`.
+- **The game's rules.** Sessions, prerequisites and the deadline ([GAME.md §7](../../../hub/roclink-scavhunt/docs/GAME.md#7-cheating-and-what-stops-it)).
+- **The scoreboard can't change the game.** It serves GET requests only, and the page escapes every string it shows (team names, box data).
+- **The scoreboard keeps tokens secret.**
+  - A token is who a team is, to a box: whoever has another team's typed code, or a card with its UID written on, plays as that team. They're charged box time and penalties, and the boxes are held busy.
+  - So `/api/events` leaves out every event's `token` and each team's `tokens`. Only the operator, on the box, sees them.
+
+**Where it falls short:**
+- **Everything rests on the broker.** The game trusts the hub's `sec` and `fcnt`, and the hub trusts the gateway's. So the `roclink-gw`, `roclink-hub` or `admin` password forges any `WIN` ([Mosquitto](#mosquitto)).
+- **Requests are unlimited.** Every request gets a thread and its own SQLite connection, so a flood from the LAN can slow the scoreboard.
+
+### The containers
+
+- **Escaping a container makes you `roclink`.** Code that escapes a container gets that user. It has no sudo, and owns only `/srv/roclink` and its own home.
+- **The services share that user.** One escape is therefore every service: their configs (MQTT passwords included), their databases, and their containers through roclink's podman socket.
+- **The Beszel agent holds that socket.** It's mounted into the agent's container for container stats. Mounting it read-only doesn't limit what the API will do, so a compromised agent controls every container.
+  - The agent listens only on `127.0.0.1`, and only lets in the Beszel hub's key.
 
 ## Deployment requirements
 
