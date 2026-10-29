@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+# First match wins in sshd_config, and this file comes first: keys only, the
+# ssh-users group only, no root.
+PermitRootLogin no
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+AllowGroups ssh-users
+
+HostKey /etc/ssh/ssh_host_ed25519_key
+MaxAuthTries 3
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LogLevel VERBOSE
+
+# ssh -L reaches the services on 127.0.0.1; nothing else is forwarded.
+AllowTcpForwarding local
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+PermitUserEnvironment no

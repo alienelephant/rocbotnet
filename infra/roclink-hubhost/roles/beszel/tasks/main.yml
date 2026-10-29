@@ -1,0 +1,94 @@
+# Beszel: the hub (https://<hub>/, behind a client certificate) and an agent
+# for this host. The hub connects to its agents over SSH, with the key it made
+# on its first start; the agents are given its public key. This role saves
+# that key as beszel-hub.pub next to site.yml, where the gateway playbook's
+# beszel_agent role reads it.
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+  loop:
+    - "{{ roclink_root }}/data/beszel"
+    - "{{ roclink_root }}/data/beszel-agent"
+
+- name: Images
+  ansible.builtin.shell: podman image exists {{ item }} || podman pull -q {{ item }}
+  args:
+    chdir: /
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+  loop: [ "{{ beszel_image }}", "{{ beszel_agent_image }}" ]
+  register: pull
+  changed_when: pull.stdout | length > 0
+
+- name: Hub unit
+  ansible.builtin.template:
+    src: beszel.container.j2
+    dest: "{{ roclink_quadlets }}/beszel.container"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0644"
+  register: hub_unit
+
+- name: Hub running
+  ansible.builtin.systemd:
+    name: beszel.service
+    scope: user
+    daemon_reload: true
+    state: "{{ 'restarted' if (hub_unit is changed or pull.results[0] is changed) else 'started' }}"
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: The hub's key (made on its first start)
+  ansible.builtin.wait_for:
+    path: "{{ roclink_root }}/data/beszel/id_ed25519"
+    timeout: 60
+
+- name: Its public half
+  ansible.builtin.command: ssh-keygen -y -f {{ roclink_root }}/data/beszel/id_ed25519
+  register: beszel_pub
+  changed_when: false
+
+- name: Saved for the gateways' agents (beszel-hub.pub)
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/beszel-hub.pub"
+    content: "{{ beszel_pub.stdout }}\n"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: Agent unit
+  ansible.builtin.template:
+    src: beszel-agent.container.j2
+    dest: "{{ roclink_quadlets }}/beszel-agent.container"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0644"
+  register: agent_unit
+
+- name: Agent running
+  ansible.builtin.systemd:
+    name: beszel-agent.service
+    scope: user
+    daemon_reload: true
+    state: "{{ 'restarted' if (agent_unit is changed or pull.results[1] is changed) else 'started' }}"
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: Beszel answers
+  ansible.builtin.uri:
+    url: http://127.0.0.1:{{ beszel_port }}/api/health
+  register: beszel_health
+  retries: 10
+  delay: 3
+  until: beszel_health.status == 200
+
+- name: Next
+  ansible.builtin.debug:
+    msg: >-
+      Beszel is at https://{{ ansible_host }}/ (with your client certificate).
+      First time: create the admin account there, then add this host as a system:
+      host 127.0.0.1, port {{ beszel_agent_port }} (docs/runbooks/beszel.md).

@@ -1,0 +1,52 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# The roclink hub's services, for the admin. They're rootless podman
+# containers of the {{ roclink_user }} user, run as its systemd user units; this runs
+# podman and systemctl as that user for you.
+#
+#   roclink status                     the services and their containers
+#   roclink logs [service]             follow a service's log (default: all of them)
+#   roclink restart [service...]       default: all, in order
+#   roclink stop | start [service...]
+#   roclink scavhunt <command>         the game's operator commands (roclink scavhunt -h)
+#   roclink watch [topic]              everything on the broker (default roclink/#), as admin
+#   roclink backup                     back up now (it also runs nightly)
+#   roclink podman <args>              any podman command, as {{ roclink_user }}
+#
+# Services: mosquitto roclink-hub scavhunt caddy beszel beszel-agent
+set -euo pipefail
+[ "$EUID" = 0 ] || exec sudo "$0" "$@"
+
+U={{ roclink_user }}
+ID={{ roclink_uid }}
+ALL="mosquitto roclink-hub scavhunt caddy beszel beszel-agent"
+as_roclink() {
+    cd /
+    sudo -u "$U" XDG_RUNTIME_DIR=/run/user/$ID DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$ID/bus "$@"
+}
+units() { for s in ${@:-$ALL}; do echo "$s.service"; done; }
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case $cmd in
+    status)
+        as_roclink systemctl --user --no-pager list-units --all $(units)
+        echo
+        as_roclink podman ps -a --format 'table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}' ;;
+    logs)
+        if [ $# -eq 0 ]; then exec journalctl -f -n 50 _UID=$ID
+        else exec journalctl -f -n 100 _UID=$ID "_SYSTEMD_USER_UNIT=$1.service" + _UID=$ID "CONTAINER_NAME=$1"; fi ;;
+    restart | stop | start)
+        as_roclink systemctl --user "$cmd" $(units "$@") ;;
+    scavhunt)
+        exec_flags=-i; [ -t 0 ] && exec_flags=-it
+        as_roclink podman exec $exec_flags scavhunt scavhunt "$@" ;;
+    watch)
+        exec mosquitto_sub -h 127.0.0.1 -p {{ mqtt_port }} -u admin -P "$(< {{ roclink_root }}/etc/admin-mqtt-password)" -v -t "${1:-roclink/#}" ;;
+    backup)
+        systemctl start --wait roclink-backup.service
+        journalctl -n 20 --no-pager -u roclink-backup.service ;;
+    podman)
+        as_roclink podman "$@" ;;
+    *)
+        sed -n '3,15p' "$0"; exit 1 ;;
+esac

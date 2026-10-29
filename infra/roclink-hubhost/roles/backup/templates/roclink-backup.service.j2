@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Back up the roclink hub's databases
+
+[Service]
+Type=oneshot
+User={{ roclink_user }}
+Group={{ roclink_user }}
+ExecStart=/usr/local/sbin/roclink-backup
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={{ roclink_root }}/data {{ backup_dir }}
+PrivateTmp=yes
+PrivateNetwork=yes

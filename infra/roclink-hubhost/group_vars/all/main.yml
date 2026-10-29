@@ -1,0 +1,57 @@
+# --- the box
+hub_lan: 192.168.8.0/24      # the only network that may reach it: SSH, web, MQTT, NTP
+admin_user: rocadmin
+admin_key: ~/.ssh/id_ed25519_rocadmin.pub   # on this machine
+ssh_users: [rocadmin, rocuser]   # may log in over SSH, with a key; rocuser has none yet
+allow_reboot: true           # reboot when an update needs it (-e allow_reboot=false during a game)
+
+# --- the services: rootless podman containers of one user, as systemd user units
+roclink_user: roclink
+roclink_uid: 1500
+roclink_root: /srv/roclink   # etc/ (configs), data/ (databases), src/ (image sources)
+roclink_quadlets: /home/{{ roclink_user }}/.config/containers/systemd
+roclink_env:                 # for tasks that run podman or systemctl --user as roclink
+  XDG_RUNTIME_DIR: /run/user/{{ roclink_uid }}
+
+# Pinned; upgrading one is docs/runbooks/updates.md.
+mosquitto_image: docker.io/library/eclipse-mosquitto:2.0.22
+caddy_image: docker.io/library/caddy:2.11.7
+beszel_image: docker.io/henrygd/beszel:0.21.1
+beszel_agent_image: docker.io/henrygd/beszel-agent:0.21.1
+python_image: docker.io/library/python:3.12-slim-trixie   # base of the hub's and game's images
+
+# The hub and the game are built from this repository at src_ref (committed
+# code only: uncommitted changes are not deployed).
+repo_root: "{{ playbook_dir }}/../.."
+src_ref: HEAD
+
+# --- ports. Only mqtts_port and the web ports are open, to hub_lan; the rest
+# listen on 127.0.0.1.
+mqtt_port: 1883              # plain, on 127.0.0.1: the hub, the game, roclink watch
+mqtts_port: 8883             # TLS, for the LAN: the gateways (server certificate from roles/pki)
+http_port: 80                # public: the scoreboard, and the public net's API under /public/
+beszel_https_port: 443       # admin, client certificate: Beszel
+hubapi_https_port: 8443      # admin, client certificate: the hub's read-only API
+hub_api_port: 8080
+public_api_port: 8081
+scoreboard_port: 8090
+beszel_port: 8091
+beszel_agent_port: 45876
+
+# --- MQTT: the central broker. name -> password (in the vault)
+mqtt_users:
+  roclink-gw: "{{ vault_mqtt_roclink_gw }}"
+  roclink-hub: "{{ vault_mqtt_roclink_hub }}"
+  roclink-ops: "{{ vault_mqtt_roclink_ops }}"
+  admin: "{{ vault_mqtt_admin }}"
+  scavhunt: "{{ vault_mqtt_scavhunt }}"
+
+# --- admin client certificates (roles/pki). One per person; removing a name
+# revokes it at the next run of --tags web.
+admin_clients: [alienelephant]
+pki_dir: "{{ playbook_dir }}/pki"
+
+# --- backups (roles/backup): nightly, kept here on the box
+backup_dir: /var/backups/roclink
+backup_keep_daily: 14
+backup_keep_weekly: 8        # Sunday's

@@ -17,6 +17,7 @@ Everything for the roclink scavenger hunt: the protocol, the gateway, the hub an
 | `rfidproxies/` | `rfidprox` | The proxy firmware (Heltec V3/V4, XIAO ESP32-S3; Wi-Fi or LoRa), `boxlink/` (the box's library) and `tools/boxsim.py` |
 | `scavboxes/` | `roclink-scavbox-wifi`, `roclink-scavbox-lora` | Demo puzzle boxes: the ESP32 behind the XIAO (Wi-Fi), the ESP32-S3 behind the Heltec (LoRa) |
 | `infra/` | `roclink-bench` | This Mac's running hub and game: configs, the `roclink` script, `setup.sh`, the VS Code workspace |
+| `infra/` | `roclink-hubhost` | The Ansible for the hub box (Debian 13): hardening, the central MQTT broker, the hub and game in rootless podman, Caddy, Beszel, backups |
 
 ## Tools on the Mac
 
@@ -62,7 +63,8 @@ cd rfidproxies/rfidprox/boxlink && c++ -std=c++17 -Isrc test/test_frame.cpp src/
 
 | | |
 |---|---|
-| Gateway Pi | `192.168.8.237` (Ethernet), user `botmaker`; MQTT on 1883; Wi-Fi AP `roclink-nodes` (10.42.0.1), UDP 3333 for Wi-Fi nodes; LoRa 915.0 MHz SF9 |
+| Hub | `192.168.8.134`, user `rocadmin`: the MQTT broker (8883, TLS), the hub, the game (scoreboard on :80), Beszel |
+| Gateway Pi | `192.168.8.237` (Ethernet), user `botmaker`; publishes to the hub's broker; Wi-Fi AP `roclink-nodes` (10.42.0.1), UDP 3333 for Wi-Fi nodes; LoRa 915.0 MHz SF9 |
 | This Mac | `192.168.8.112`: the hub (API on localhost:8080) and the game (scoreboard on :8090) |
 | Proxies | Heltec V3 `0x0301` (LoRa) and XIAO `0x0302` (Wi-Fi), net `0x42`, demo keys; dummy fobs `f0b00301`, `f0b00302` |
 

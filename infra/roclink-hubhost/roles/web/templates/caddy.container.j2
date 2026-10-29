@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Caddy: the hub's web front (public scoreboard, admin pages)
+
+[Container]
+Image={{ caddy_image }}
+ContainerName=caddy
+Network=host
+Volume={{ roclink_root }}/etc/caddy:/etc/caddy:ro
+Volume={{ roclink_root }}/data/caddy:/data
+Volume={{ roclink_root }}/data/caddy-config:/config
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+# The image's caddy binary carries this file capability, and won't exec
+# without it under no-new-privileges.
+AddCapability=CAP_NET_BIND_SERVICE
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

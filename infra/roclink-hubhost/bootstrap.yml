@@ -1,0 +1,72 @@
+# Run once on a fresh Debian install, as the installer's user, to create the
+# admin user that site.yml logs in as (docs/runbooks/install.md):
+#
+#   ssh -M -S /tmp/.jvssh -fN rocuser@192.168.8.134      # asks rocuser's password
+#   ansible-playbook bootstrap.yml -K                     # asks the sudo password
+#   ansible-playbook bootstrap.yml -K -e ansible_become_method=su   # rocuser can't sudo: root's password
+#
+# It changes nothing else: SSH still takes passwords until site.yml's harden role.
+- name: Bootstrap the admin user
+  hosts: hub
+  become: true
+  gather_facts: false
+  vars:
+    ansible_user: rocuser
+    ansible_ssh_common_args: -o ControlMaster=auto -o ControlPath=/tmp/.jvssh -o ControlPersist=4h
+  tasks:
+    # A netinstall can leave its install medium in sources.list, and may lack
+    # python3 and sudo, which everything after this needs.
+    - name: Python and sudo
+      ansible.builtin.raw: |
+        sed -i 's/^deb cdrom:/# deb cdrom:/' /etc/apt/sources.list 2>/dev/null || true
+        if ! command -v python3 >/dev/null || ! command -v sudo >/dev/null; then
+          apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -yq python3 sudo && echo INSTALLED
+        fi
+      register: raw_install
+      changed_when: "'INSTALLED' in raw_install.stdout"
+
+    - name: Facts
+      ansible.builtin.setup:
+
+    - name: ssh-users group (the only group sshd lets in, once hardened)
+      ansible.builtin.group:
+        name: ssh-users
+
+    - name: Admin user
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        comment: roclink hub admin
+        shell: /bin/bash
+        groups: [sudo, ssh-users]
+        append: true
+        password: "{{ vault_rocadmin_password_hash }}"
+        update_password: on_create
+
+    - name: Admin key
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        key: "{{ lookup('file', admin_key) }}"
+        exclusive: true
+
+    - name: Admin sudo, without a password
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/{{ admin_user }}
+        content: "{{ admin_user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s   # su leaves /usr/sbin off PATH
+
+    - name: The other SSH users are in ssh-users
+      ansible.builtin.user:
+        name: "{{ item }}"
+        groups: [ssh-users]
+        append: true
+      loop: "{{ ssh_users | difference([admin_user]) }}"
+
+    - name: Check that the admin logs in with the key and sudoes without a password
+      ansible.builtin.command: >-
+        ssh -o BatchMode=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new
+        -i {{ admin_key | regex_replace('\.pub$', '') }}
+        {{ admin_user }}@{{ ansible_host }} sudo -n true
+      delegate_to: localhost
+      become: false
+      changed_when: false

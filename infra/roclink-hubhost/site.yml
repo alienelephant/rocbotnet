@@ -1,0 +1,28 @@
+# Sets up the roclink hub host: Debian 13, hardened, with the broker, the hub,
+# the game, the web front and Beszel in rootless podman containers.
+#
+#   ansible-playbook site.yml                  # everything
+#   ansible-playbook site.yml --tags apps      # rebuild and restart the hub and the game
+#   ansible-playbook site.yml --tags mqtt      # broker users and ACL
+#
+# Tags: base, harden, podman, mqtt and web (both with pki), apps, beszel, backup.
+# A fresh install needs bootstrap.yml first.
+- name: roclink hub host
+  hosts: hub
+  become: true
+  pre_tasks:
+    - name: Logged in as the admin, with the key
+      ansible.builtin.assert:
+        that: ansible_user == admin_user
+        fail_msg: site.yml logs in as {{ admin_user }}; on a fresh install run bootstrap.yml first
+      tags: always
+  roles:
+    - { role: base, tags: [base] }
+    - { role: harden, tags: [harden] }
+    - { role: podman, tags: [podman] }
+    - { role: pki, tags: [pki, mqtt, web] }   # the broker's TLS and the admin pages
+    - { role: mqtt, tags: [mqtt] }
+    - { role: apps, tags: [apps] }
+    - { role: web, tags: [web] }
+    - { role: beszel, tags: [beszel] }
+    - { role: backup, tags: [backup] }

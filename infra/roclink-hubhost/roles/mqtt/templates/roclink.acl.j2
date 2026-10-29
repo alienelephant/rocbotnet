@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# From the roclink-hub repository (deploy/mosquitto.acl), with an admin user and
+# no anonymous access. As the gateway's own broker had it.
+
+# Gateways publish what they hear (.../up), what they drop (.../rejected) and
+# what became of each downlink (.../down_status), and read the downlink the
+# hub hands them.
+user roclink-gw
+topic write roclink/in/#
+topic read roclink/out/#
+
+# The hub reads gateways, writes deliveries, and passes downlink on.
+user roclink-hub
+topic read roclink/in/#
+topic write roclink/svc/#
+topic write roclink/pub/#
+topic write roclink/ops/#
+topic write roclink/out/#
+topic read roclink/svc/+/down
+
+# Operators: rejection summaries and alerts.
+user roclink-ops
+topic read roclink/ops/#
+
+# Debugging: everything.
+user admin
+topic readwrite #
+
+# Every other named user is a service: its own deliveries and downlink.
+pattern read roclink/svc/%u/#
+pattern write roclink/svc/%u/down

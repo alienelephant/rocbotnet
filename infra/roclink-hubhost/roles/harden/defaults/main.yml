@@ -1,0 +1,16 @@
+unwanted_packages:
+  - avahi-daemon
+  - cups-daemon
+  - exim4-base
+  - exim4-config
+  - exim4-daemon-light
+  - ftp
+  - inetutils-telnet
+  - installation-report
+  - nfs-common
+  - popularity-contest
+  - reportbug
+  - rpcbind
+  - rsh-client
+  - telnet
+  - tnftp

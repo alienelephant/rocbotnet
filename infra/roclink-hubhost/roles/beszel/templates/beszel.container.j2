@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Beszel hub: monitoring for the hub host and the gateways
+
+[Container]
+Image={{ beszel_image }}
+ContainerName=beszel
+# Host network: it reaches this host's agent on 127.0.0.1, and the gateways' on the LAN.
+Network=host
+Exec=serve --http 127.0.0.1:{{ beszel_port }}
+Environment=APP_URL=https://{{ ansible_host }}
+Volume={{ roclink_root }}/data/beszel:/beszel_data
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

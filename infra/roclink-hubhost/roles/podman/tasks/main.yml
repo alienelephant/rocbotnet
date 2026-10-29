@@ -1,0 +1,80 @@
+- name: Podman, rootless
+  ansible.builtin.apt:
+    name:
+      - podman
+      - crun
+      - netavark
+      - aardvark-dns
+      - passt                # rootless networking (the image builds)
+      - uidmap
+      - catatonit            # RunInit=true
+      - dbus-user-session    # systemctl --user
+      - systemd-container
+
+# A normal user, not --system: useradd gives it subordinate ids for the
+# containers' user namespaces. It can't log in; rocadmin works through it with
+# the roclink command.
+- name: roclink user
+  ansible.builtin.user:
+    name: "{{ roclink_user }}"
+    uid: "{{ roclink_uid }}"
+    comment: roclink services (rootless podman)
+    shell: /usr/sbin/nologin
+    password: "!"
+    home: /home/{{ roclink_user }}
+
+- name: Its subordinate ids
+  ansible.builtin.command: grep -c "^{{ roclink_user }}:" /etc/subuid /etc/subgid
+  register: subids
+  changed_when: false
+  failed_when: subids.stdout_lines | map('regex_replace', '.*:', '') | map('int') | min < 1
+
+- name: Its services run without anyone logged in
+  ansible.builtin.command: loginctl enable-linger {{ roclink_user }}
+  args:
+    creates: /var/lib/systemd/linger/{{ roclink_user }}
+
+- name: Its systemd instance is up
+  ansible.builtin.systemd:
+    name: user@{{ roclink_uid }}.service
+    state: started
+
+- name: Home, private
+  ansible.builtin.file:
+    path: /home/{{ roclink_user }}
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+  loop:
+    - "{{ roclink_root }}"
+    - "{{ roclink_root }}/etc"
+    - "{{ roclink_root }}/data"
+    - "{{ roclink_root }}/src"
+    - /home/{{ roclink_user }}/.config
+    - /home/{{ roclink_user }}/.config/containers
+    - "{{ roclink_quadlets }}"
+
+# Beszel's agent reads container stats from it.
+- name: Its podman API socket
+  ansible.builtin.systemd:
+    name: podman.socket
+    scope: user
+    enabled: true
+    state: started
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: The roclink command, for the admin
+  ansible.builtin.template:
+    src: roclink.j2
+    dest: /usr/local/bin/roclink
+    mode: "0755"

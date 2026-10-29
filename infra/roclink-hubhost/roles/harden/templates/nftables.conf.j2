@@ -1,0 +1,36 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+# Inbound: from the LAN ({{ hub_lan }}), to the hub's services, and nothing
+# else. Outbound is open. Only this table is replaced on reload, so fail2ban's
+# own table stays.
+table inet roclink
+delete table inet roclink
+
+table inet roclink {
+	set lan4 {
+		type ipv4_addr
+		flags interval
+		elements = { {{ hub_lan }} }
+	}
+
+	chain input {
+		type filter hook input priority filter; policy drop;
+		ct state established,related accept
+		ct state invalid drop
+		iif lo accept
+		meta l4proto { icmp, ipv6-icmp } accept
+		udp sport 67 udp dport 68 accept     # DHCP
+		udp sport 547 udp dport 546 accept   # DHCPv6
+
+		# SSH, the public web page, the admin pages, MQTT over TLS
+		ip saddr @lan4 tcp dport { 22, {{ http_port }}, {{ beszel_https_port }}, {{ hubapi_https_port }}, {{ mqtts_port }} } accept
+		# NTP for the gateways
+		ip saddr @lan4 udp dport 123 accept
+
+		limit rate 10/minute log prefix "nft-drop: " level info
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+	}
+}

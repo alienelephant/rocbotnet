@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Beszel agent: this host's metrics, and its containers'
+Wants=podman.socket
+After=podman.socket
+
+[Container]
+Image={{ beszel_agent_image }}
+ContainerName=beszel-agent
+# Host network: the host's interfaces, and the hub reaches it on 127.0.0.1.
+Network=host
+Environment=LISTEN=127.0.0.1:{{ beszel_agent_port }}
+Environment="KEY={{ beszel_pub.stdout }}"
+Environment=DATA_DIR=/var/lib/beszel-agent
+Volume={{ roclink_root }}/data/beszel-agent:/var/lib/beszel-agent
+# roclink's podman API, for the containers' stats. ":ro" protects the socket
+# file only: the API can still start, stop and create any of roclink's containers.
+Volume=/run/user/{{ roclink_uid }}/podman/podman.sock:/var/run/docker.sock:ro
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

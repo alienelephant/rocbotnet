@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# The game on the hub host: the bench game (infra/roclink-bench/etc/game.toml),
+# the real boxes only, the Heltec's (LoRa) and the XIAO's (Wi-Fi). Paths are
+# inside the container: /var/lib/scavhunt is {{ roclink_root }}/data/scavhunt.
+[game]
+id = "bench-hunt"
+title = "Bench Hunt"
+time_limit_min = 120
+session_timeout_min = 10
+points = 100
+hint_penalty_s = [60, 120, 300]
+wrong_penalty_s = 30
+
+[[box]]
+id = "tower"
+name = "Tower (Heltec LoRa)"
+net = 0x42
+node = 0x0301
+points = 200
+
+[[box]]
+id = "workshop"
+name = "Workshop (XIAO)"
+net = 0x42
+node = 0x0302
+
+[service]
+name = "scavhunt"
+host = "127.0.0.1"
+port = {{ mqtt_port }}
+username = "scavhunt"
+password_file = "/etc/scavhunt/mqtt-password"
+db = "/var/lib/scavhunt/game.db"
+verdict_ttl_s = 60
+allow_insecure = false
+
+# The scoreboard: public, at http://<hub>/ through Caddy.
+[api]
+host = "127.0.0.1"
+port = {{ scoreboard_port }}
+hub_api = "http://127.0.0.1:{{ hub_api_port }}"   # box data on the scoreboard, from the hub

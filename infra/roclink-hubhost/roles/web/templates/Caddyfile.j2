@@ -1,0 +1,51 @@
+# {{ ansible_managed }}
+{
+	admin off
+	auto_https off
+	# Browsers that connect by IP send no server name.
+	default_sni {{ ansible_host }}
+	servers {
+		# With client auth on, Caddy otherwise answers 421 when the Host
+		# header doesn't match the TLS server name, which an IP never has.
+		# Its point is a certificate accepted by one site being used at another
+		# with different rules; both admin sites here take the same ones.
+		strict_sni_host insecure_off
+	}
+}
+
+# The admin pages: HTTPS with the admin CA's server certificate, and only the
+# admins' own client certificates (admin_clients) get in. Removing one from
+# admin_clients shuts it out, although the CA still signed it.
+(admin_tls) {
+	tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/caddy/certs/ca.crt
+{% for name in admin_clients %}
+			trusted_leaf_cert_file /etc/caddy/certs/admins/{{ name }}.crt
+{% endfor %}
+		}
+	}
+}
+
+# Public, plain HTTP on the LAN: the scoreboard, and the public net's API.
+http://:{{ http_port }} {
+	handle_path /public/* {
+		reverse_proxy 127.0.0.1:{{ public_api_port }}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:{{ scoreboard_port }}
+	}
+}
+
+# Beszel
+https://:{{ beszel_https_port }} {
+	import admin_tls
+	reverse_proxy 127.0.0.1:{{ beszel_port }}
+}
+
+# The hub's read-only API
+https://:{{ hubapi_https_port }} {
+	import admin_tls
+	reverse_proxy 127.0.0.1:{{ hub_api_port }}
+}

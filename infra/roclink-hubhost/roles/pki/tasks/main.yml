@@ -1,0 +1,96 @@
+# The hub's certificates, made here on the control machine in pki_dir
+# (git-ignored; back it up with .vault-pass):
+#
+#   ca.key, ca.crt              the admin CA: signs the server's and the clients' certificates
+#                               (ca.crt is also copied to hub-ca.crt, committed)
+#   server.key, server.crt      the hub's: Caddy's, for https://<hub>, and Mosquitto's, for MQTT over TLS
+#   clients/<name>.p12          one per admin_clients name, to import in a browser
+#                               (passphrase: vault_p12_password)
+#
+# Each is made once; delete one to make it again (docs/runbooks/admin-certs.md).
+- name: PKI on the control machine
+  delegate_to: localhost
+  become: false
+  run_once: true
+  block:
+    - name: Directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: ["{{ pki_dir }}", "{{ pki_dir }}/clients"]
+
+    # Admins trust this CA in their browsers, so it may only sign for the hub's
+    # names: the LAN's addresses and the hub's hostname. Without the name
+    # constraints, its key could impersonate any HTTPS site to them.
+    - name: Admin CA
+      ansible.builtin.shell: >-
+        openssl req -x509 -new -nodes -days 3650
+        -newkey ec -pkeyopt ec_paramgen_curve:P-256
+        -keyout ca.key -out ca.crt
+        -subj "/O=roclink/CN=roclink hub admin CA"
+        -addext basicConstraints=critical,CA:TRUE,pathlen:0
+        -addext keyUsage=critical,keyCertSign,cRLSign
+        -addext "nameConstraints=critical,permitted;IP:$(python3 -c 'import ipaddress, sys; n = ipaddress.ip_network(sys.argv[1]); print(f"{n.network_address}/{n.netmask}")' {{ hub_lan }}),permitted;DNS:{{ inventory_hostname }}"
+      args:
+        chdir: "{{ pki_dir }}"
+        creates: "{{ pki_dir }}/ca.crt"
+
+    - name: The CA is limited to the hub's names (one made before that must be replaced, docs/runbooks/admin-certs.md)
+      ansible.builtin.command: openssl x509 -in {{ pki_dir }}/ca.crt -noout -ext nameConstraints
+      register: ca_constraints
+      changed_when: false
+      failed_when: "'Permitted' not in ca_constraints.stdout"
+
+    - name: The CA's certificate, committed, for the gateways (MQTT over TLS)
+      ansible.builtin.copy:
+        src: "{{ pki_dir }}/ca.crt"
+        dest: "{{ playbook_dir }}/hub-ca.crt"
+        mode: "0644"
+
+    - name: Server certificate
+      ansible.builtin.command: >-
+        openssl req -x509 -new -nodes -days 825
+        -CA ca.crt -CAkey ca.key
+        -newkey ec -pkeyopt ec_paramgen_curve:P-256
+        -keyout server.key -out server.crt
+        -subj "/O=roclink/CN={{ inventory_hostname }}"
+        -addext subjectAltName=IP:{{ ansible_host }},DNS:{{ inventory_hostname }}
+        -addext basicConstraints=critical,CA:FALSE
+        -addext keyUsage=critical,digitalSignature
+        -addext extendedKeyUsage=serverAuth
+      args:
+        chdir: "{{ pki_dir }}"
+        creates: "{{ pki_dir }}/server.crt"
+
+    - name: Client certificates
+      ansible.builtin.command: >-
+        openssl req -x509 -new -nodes -days 730
+        -CA ca.crt -CAkey ca.key
+        -newkey ec -pkeyopt ec_paramgen_curve:P-256
+        -keyout clients/{{ item }}.key -out clients/{{ item }}.crt
+        -subj "/O=roclink/CN={{ item }}"
+        -addext basicConstraints=critical,CA:FALSE
+        -addext keyUsage=critical,digitalSignature
+        -addext extendedKeyUsage=clientAuth
+      args:
+        chdir: "{{ pki_dir }}"
+        creates: "{{ pki_dir }}/clients/{{ item }}.crt"
+      loop: "{{ admin_clients }}"
+
+    - name: Client certificates, for browsers
+      ansible.builtin.command: >-
+        openssl pkcs12 -export
+        -inkey clients/{{ item }}.key -in clients/{{ item }}.crt -certfile ca.crt
+        -name "roclink hub admin ({{ item }})"
+        -out clients/{{ item }}.p12 -passout env:P12_PASSWORD
+      args:
+        chdir: "{{ pki_dir }}"
+        creates: "{{ pki_dir }}/clients/{{ item }}.p12"
+      environment:
+        P12_PASSWORD: "{{ vault_p12_password }}"
+      loop: "{{ admin_clients }}"
+
+    - name: Keys stay private
+      ansible.builtin.shell: chmod 600 {{ pki_dir }}/*.key {{ pki_dir }}/clients/*.key {{ pki_dir }}/clients/*.p12
+      changed_when: false

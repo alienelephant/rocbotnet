@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+[Unit]
+Description=roclink hub: MQTT uplinks into SQLite, routing, downlink
+Wants=mosquitto.service
+After=mosquitto.service
+
+[Container]
+Image=localhost/roclink-hub:{{ app_tags['roclink-hub'] }}
+ContainerName=roclink-hub
+Network=host
+Exec=roclink-hub --config /etc/roclink-hub/config.toml
+Volume={{ roclink_root }}/etc/roclink-hub:/etc/roclink-hub:ro
+Volume={{ roclink_root }}/data/hub:/var/lib/roclink-hub
+RunInit=true
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+# The supervisor stops its children in order on SIGTERM.
+StopTimeout=60
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

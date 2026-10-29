@@ -1,0 +1,69 @@
+# One app's image, localhost/<name>:<tree>, where <tree> is the git tree of its
+# directory at src_ref: it's built again only when that directory changed.
+# The unit names the tag, so a new one restarts the container.
+- name: "{{ app.name }}: source tree at {{ src_ref }}"
+  ansible.builtin.command: git -C {{ repo_root }} rev-parse --short=12 {{ src_ref }}:{{ app.path }}
+  delegate_to: localhost
+  become: false
+  register: tree
+  changed_when: false
+
+- name: "{{ app.name }}: tag"
+  ansible.builtin.set_fact:
+    app_tags: "{{ app_tags | default({}) | combine({app.name: tree.stdout}) }}"
+
+- name: "{{ app.name }}: built already?"
+  ansible.builtin.command: podman image exists localhost/{{ app.name }}:{{ tree.stdout }}
+  args:
+    chdir: /
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+  register: built
+  changed_when: false
+  failed_when: built.rc not in [0, 1]
+
+- name: "{{ app.name }}: build"
+  when: built.rc == 1
+  block:
+    - name: "{{ app.name }}: source archive"
+      ansible.builtin.command: >-
+        git -C {{ repo_root }} archive --format=tar
+        -o {{ playbook_dir }}/.build/{{ app.name }}.tar {{ src_ref }} -- {{ app.path }}
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: "{{ app.name }}: clean source directory"
+      ansible.builtin.file:
+        path: "{{ roclink_root }}/src/{{ app.name }}"
+        state: "{{ item }}"
+        owner: "{{ roclink_user }}"
+        group: "{{ roclink_user }}"
+        mode: "0700"
+      loop: [absent, directory]
+
+    - name: "{{ app.name }}: source"
+      ansible.builtin.unarchive:
+        src: "{{ playbook_dir }}/.build/{{ app.name }}.tar"
+        dest: "{{ roclink_root }}/src/{{ app.name }}"
+        extra_opts: ["--strip-components={{ app.path.split('/') | length }}"]
+        owner: "{{ roclink_user }}"
+        group: "{{ roclink_user }}"
+
+    - name: "{{ app.name }}: Containerfile"
+      ansible.builtin.copy:
+        src: Containerfile
+        dest: "{{ roclink_root }}/src/{{ app.name }}/Containerfile.roclink"
+        owner: "{{ roclink_user }}"
+        group: "{{ roclink_user }}"
+        mode: "0644"
+
+    - name: "{{ app.name }}: podman build"
+      ansible.builtin.command: >-
+        podman build --pull=newer --build-arg BASE={{ python_image }}
+        -t localhost/{{ app.name }}:{{ tree.stdout }}
+        -f Containerfile.roclink .
+      args:
+        chdir: "{{ roclink_root }}/src/{{ app.name }}"
+      become_user: "{{ roclink_user }}"
+      environment: "{{ roclink_env }}"

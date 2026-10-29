@@ -1,0 +1,6 @@
+.vault-pass
+# The admin CA's key, the server's and the clients' keys (roles/pki)
+/pki/
+# Source archives for the image builds (roles/apps)
+/.build/
+/pki.unconstrained/

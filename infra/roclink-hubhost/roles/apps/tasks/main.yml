@@ -1,0 +1,116 @@
+# The hub (roclink-hub) and the game (roclink-scavhunt), built into images on
+# the box from this repository at src_ref, and run as rootless containers.
+- name: Uncommitted changes in hub/? (they aren't deployed)
+  ansible.builtin.command: git -C {{ repo_root }} status --porcelain -- hub/
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: dirty
+  changed_when: false
+
+- name: Uncommitted changes aren't deployed
+  ansible.builtin.debug:
+    msg: "Deploying {{ src_ref }}; not deployed: {{ dirty.stdout_lines | join(', ') }}"
+  when: dirty.stdout | length > 0
+
+- name: Local build directory (source archives)
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/.build"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Images
+  ansible.builtin.include_tasks: image.yml
+  loop:
+    - { name: roclink-hub, path: hub/roclink-hub }
+    - { name: scavhunt, path: hub/roclink-scavhunt }
+  loop_control:
+    loop_var: app
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+  loop:
+    - "{{ roclink_root }}/etc/roclink-hub"
+    - "{{ roclink_root }}/etc/scavhunt"
+    - "{{ roclink_root }}/data/hub"
+    - "{{ roclink_root }}/data/scavhunt"
+
+- name: Hub config
+  ansible.builtin.template:
+    src: hub.toml.j2
+    dest: "{{ roclink_root }}/etc/roclink-hub/config.toml"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  register: hub_conf
+
+- name: Game
+  ansible.builtin.template:
+    src: game.toml.j2
+    dest: "{{ roclink_root }}/etc/scavhunt/game.toml"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  register: game_conf
+
+- name: Game's MQTT password
+  ansible.builtin.copy:
+    dest: "{{ roclink_root }}/etc/scavhunt/mqtt-password"
+    content: "{{ mqtt_users.scavhunt }}\n"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  no_log: true
+  register: game_pw
+
+- name: Units
+  ansible.builtin.template:
+    src: "{{ item }}.container.j2"
+    dest: "{{ roclink_quadlets }}/{{ item }}.container"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0644"
+  loop: [roclink-hub, scavhunt]
+  register: app_units
+
+- name: The hub running
+  ansible.builtin.systemd:
+    name: roclink-hub.service
+    scope: user
+    daemon_reload: true
+    state: "{{ 'restarted' if (hub_conf is changed or app_units.results[0] is changed) else 'started' }}"
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: The game running
+  ansible.builtin.systemd:
+    name: scavhunt.service
+    scope: user
+    daemon_reload: true
+    state: "{{ 'restarted' if (game_conf is changed or game_pw is changed or app_units.results[1] is changed) else 'started' }}"
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: The hub's API answers
+  ansible.builtin.uri:
+    url: http://127.0.0.1:{{ hub_api_port }}/api/health
+  register: hub_health
+  retries: 10
+  delay: 3
+  until: hub_health.status == 200
+
+- name: The scoreboard answers
+  ansible.builtin.uri:
+    url: http://127.0.0.1:{{ scoreboard_port }}/api/run
+  register: board
+  retries: 10
+  delay: 3
+  until: board.status == 200

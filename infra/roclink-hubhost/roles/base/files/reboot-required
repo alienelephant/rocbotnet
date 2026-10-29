@@ -1,0 +1,15 @@
+#!/bin/sh
+# Exits 0, saying why, when this box should be rebooted: a newer kernel is
+# installed than the one running, or a package asked (/run/reboot-required).
+# Exits 1 when it needn't be.
+running=$(uname -r)
+newest=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|/boot/vmlinuz-||' | sort -V | tail -n 1)
+if [ -n "$newest" ] && [ "$newest" != "$running" ]; then
+    echo "kernel $newest is installed, $running is running"
+    exit 0
+fi
+if [ -f /run/reboot-required ]; then
+    echo "requested by: $(cat /run/reboot-required.pkgs 2>/dev/null | tr '\n' ' ')"
+    exit 0
+fi
+exit 1

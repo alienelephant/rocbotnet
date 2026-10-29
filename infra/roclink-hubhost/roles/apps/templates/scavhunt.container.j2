@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+[Unit]
+Description=roclink scavenger hunt: the game service and the scoreboard
+Wants=mosquitto.service roclink-hub.service
+After=mosquitto.service roclink-hub.service
+
+[Container]
+Image=localhost/scavhunt:{{ app_tags['scavhunt'] }}
+ContainerName=scavhunt
+Network=host
+Exec=scavhunt serve
+Environment=SCAVHUNT_GAME=/etc/scavhunt/game.toml
+Volume={{ roclink_root }}/etc/scavhunt:/etc/scavhunt:ro
+Volume={{ roclink_root }}/data/scavhunt:/var/lib/scavhunt
+RunInit=true
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,29 @@
+# Nightly backups of the databases, on this box, pruned (docs/runbooks/backup-restore.md).
+- name: Backup directory
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+
+- name: Backup script
+  ansible.builtin.template:
+    src: roclink-backup.j2
+    dest: /usr/local/sbin/roclink-backup
+    mode: "0755"
+
+- name: Service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [roclink-backup.service, roclink-backup.timer]
+  register: backup_units
+
+- name: Timer on
+  ansible.builtin.systemd:
+    name: roclink-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ backup_units is changed }}"

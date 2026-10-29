@@ -1,0 +1,127 @@
+# Mosquitto: the central broker, for the gateways, the hub and the services.
+# The container runs as the image's mosquitto user (1883), mapped to roclink.
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+  loop:
+    - "{{ roclink_root }}/etc/mosquitto"
+    - "{{ roclink_root }}/etc/mosquitto/certs"
+    - "{{ roclink_root }}/data/mosquitto"
+
+- name: The hub's certificate, for MQTT over TLS (roles/pki)
+  ansible.builtin.copy:
+    src: "{{ pki_dir }}/{{ item }}"
+    dest: "{{ roclink_root }}/etc/mosquitto/certs/{{ item }}"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  loop: [server.crt, server.key, ca.crt]   # ca.crt: for the check below
+  register: mq_certs
+
+- name: Broker settings and ACL
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ roclink_root }}/etc/mosquitto/{{ item }}"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  loop: [mosquitto.conf, roclink.acl]
+  register: mq_conf
+
+- name: Password file
+  ansible.builtin.copy:
+    dest: "{{ roclink_root }}/etc/mosquitto/passwd"
+    content: |
+      {% for user, pw in mqtt_users.items() %}
+      {{ user }}:{{ pw | mosquitto_hash(user) }}
+      {% endfor %}
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  no_log: true
+  register: mq_passwd
+
+- name: admin's password, for roclink watch (root only)
+  ansible.builtin.copy:
+    dest: "{{ roclink_root }}/etc/admin-mqtt-password"
+    content: "{{ mqtt_users.admin }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Image
+  ansible.builtin.shell: podman image exists {{ mosquitto_image }} || podman pull -q {{ mosquitto_image }}
+  args:
+    chdir: /
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+  register: pull
+  changed_when: pull.stdout | length > 0
+
+- name: Unit
+  ansible.builtin.template:
+    src: mosquitto.container.j2
+    dest: "{{ roclink_quadlets }}/mosquitto.container"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0644"
+  register: mq_unit
+
+- name: Running
+  ansible.builtin.systemd:
+    name: mosquitto.service
+    scope: user
+    daemon_reload: true
+    state: "{{ 'restarted' if (mq_conf is changed or mq_passwd is changed or mq_certs is changed or mq_unit is changed or pull is changed) else 'started' }}"
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: Check a password and the ACL (admin reads its own test publish)
+  ansible.builtin.shell: |
+    set -e
+    mosquitto_sub -h 127.0.0.1 -p {{ mqtt_port }} -u admin -P "$PW" -t roclink/test/ansible -C 1 -W 10 > "$OUT" &
+    sleep 1
+    mosquitto_pub -h 127.0.0.1 -p {{ mqtt_port }} -u admin -P "$PW" -t roclink/test/ansible -m ok -q 1
+    wait
+    cat "$OUT"; rm -f "$OUT"
+  environment:
+    PW: "{{ mqtt_users.admin }}"
+    OUT: /root/.mqtt-check
+  register: mqtt_check
+  retries: 5
+  delay: 3
+  until: mqtt_check.stdout == "ok"
+  changed_when: false
+  no_log: true
+
+# As a gateway connects: to the LAN address, checking the certificate against
+# the CA and the address.
+- name: Check TLS on the LAN port
+  ansible.builtin.shell: |
+    set -e
+    mosquitto_sub -h {{ ansible_host }} -p {{ mqtts_port }} --cafile "$CA" -u admin -P "$PW" -t roclink/test/ansible-tls -C 1 -W 10 > "$OUT" &
+    sleep 1
+    mosquitto_pub -h {{ ansible_host }} -p {{ mqtts_port }} --cafile "$CA" -u admin -P "$PW" -t roclink/test/ansible-tls -m ok -q 1
+    wait
+    cat "$OUT"; rm -f "$OUT"
+  environment:
+    PW: "{{ mqtt_users.admin }}"
+    CA: "{{ roclink_root }}/etc/mosquitto/certs/ca.crt"
+    OUT: /root/.mqtt-check
+  register: mqtts_check
+  retries: 5
+  delay: 3
+  until: mqtts_check.stdout == "ok"
+  changed_when: false
+  no_log: true
+
+- name: Plain MQTT isn't on the LAN
+  ansible.builtin.command: mosquitto_pub -h {{ ansible_host }} -p {{ mqtt_port }} -u nobody -P x -t x -m x
+  register: plain_lan
+  changed_when: false
+  failed_when: plain_lan.rc == 0 or 'refused' not in plain_lan.stderr | lower

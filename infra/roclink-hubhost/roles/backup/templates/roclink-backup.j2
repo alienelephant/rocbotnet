@@ -1,0 +1,50 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Backs up the hub's databases into {{ backup_dir }}/daily/<date>/, and on
+# Sundays keeps that day's in weekly/ too. Keeps the newest {{ backup_keep_daily }} daily and
+# {{ backup_keep_weekly }} weekly ones; older ones are deleted.
+#
+# Every *.db under {{ roclink_root }}/data, taken with SQLite's online backup
+# (safe while the services write), checked, and compressed; and Beszel's SSH
+# key, which its agents trust. Not public.db: it holds a day of throwaway test
+# traffic. Configs and secrets are in git and the vault, not here.
+#
+# Runs as {{ roclink_user }}, from roclink-backup.timer; `roclink backup` runs it now.
+set -euo pipefail
+DATA={{ roclink_root }}/data
+DEST={{ backup_dir }}
+KEEP_DAILY={{ backup_keep_daily }}
+KEEP_WEEKLY={{ backup_keep_weekly }}
+
+day=$(date +%F)
+tmp=$DEST/.partial-$day
+rm -rf "$tmp"
+mkdir -p "$tmp" "$DEST/daily" "$DEST/weekly"
+
+cd "$DATA"
+find . -name '*.db' ! -name public.db ! -path './mosquitto/*' -printf '%P\n' | sort | while read -r db; do
+    out=$tmp/${db//\//__}
+    sqlite3 "$db" ".backup '$out'"
+    check=$(sqlite3 "$out" 'PRAGMA integrity_check')
+    [ "$check" = ok ] || { echo "$db: integrity check failed: $check" >&2; exit 1; }
+    zstd -q --rm "$out"
+    echo "$db: $(du -h "$out.zst" | cut -f1)"
+done
+[ -f beszel/id_ed25519 ] && cp beszel/id_ed25519 "$tmp/beszel__id_ed25519"
+
+rm -rf "$DEST/daily/$day"
+mv "$tmp" "$DEST/daily/$day"
+if [ "$(date +%u)" = 7 ]; then
+    rm -rf "$DEST/weekly/$day"
+    cp -al "$DEST/daily/$day" "$DEST/weekly/$day"
+fi
+
+prune() {  # directory, how many to keep
+    ls -1 "$1" | sort | head -n -"$2" | while read -r old; do
+        rm -rf "${1:?}/$old"
+        echo "pruned $1/$old"
+    done
+}
+prune "$DEST/daily" "$KEEP_DAILY"
+prune "$DEST/weekly" "$KEEP_WEEKLY"
+echo "backed up to $DEST/daily/$day ($(du -sh "$DEST" | cut -f1) in $DEST)"

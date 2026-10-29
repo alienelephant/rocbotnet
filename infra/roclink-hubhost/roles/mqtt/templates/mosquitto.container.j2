@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Mosquitto: the roclink MQTT broker
+
+[Container]
+Image={{ mosquitto_image }}
+ContainerName=mosquitto
+Network=host
+# The image's mosquitto user is roclink outside: it owns the config and data.
+UserNS=keep-id:uid=1883,gid=1883
+Volume={{ roclink_root }}/etc/mosquitto:/mosquitto/config:ro
+Volume={{ roclink_root }}/data/mosquitto:/mosquitto/data
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

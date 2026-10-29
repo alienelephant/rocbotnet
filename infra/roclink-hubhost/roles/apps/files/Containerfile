@@ -1,0 +1,7 @@
+# A Python package from this repository (the build context), installed into the
+# base image. The unit gives the command.
+ARG BASE
+FROM ${BASE}
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+COPY . /src
+RUN pip install --no-cache-dir --root-user-action=ignore /src && rm -rf /src

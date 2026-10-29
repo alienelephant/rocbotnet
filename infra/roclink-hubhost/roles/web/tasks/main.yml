@@ -1,0 +1,115 @@
+# Caddy: the one way in over HTTP.
+#   http://<hub>/            the scoreboard (public)
+#   http://<hub>/public/     the public test net's API (public)
+#   https://<hub>/           Beszel                         } a client certificate
+#   https://<hub>:8443/      the hub's read-only API        } from the admin CA
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0700"
+  loop:
+    - "{{ roclink_root }}/etc/caddy"
+    - "{{ roclink_root }}/etc/caddy/certs"
+    - "{{ roclink_root }}/etc/caddy/certs/admins"
+    - "{{ roclink_root }}/data/caddy"
+    - "{{ roclink_root }}/data/caddy-config"
+
+- name: The admin CA, the server's certificate and key
+  ansible.builtin.copy:
+    src: "{{ pki_dir }}/{{ item }}"
+    dest: "{{ roclink_root }}/etc/caddy/certs/{{ item }}"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  loop: [ca.crt, server.crt, server.key]
+  register: certs
+
+- name: The admins' certificates (the Caddyfile lets only admin_clients' in)
+  ansible.builtin.copy:
+    src: "{{ pki_dir }}/clients/{{ item }}.crt"
+    dest: "{{ roclink_root }}/etc/caddy/certs/admins/"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  loop: "{{ admin_clients }}"
+  register: admins
+
+- name: Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ roclink_root }}/etc/caddy/Caddyfile"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0600"
+  register: caddyfile
+
+- name: Image
+  ansible.builtin.shell: podman image exists {{ caddy_image }} || podman pull -q {{ caddy_image }}
+  args:
+    chdir: /
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+  register: pull
+  changed_when: pull.stdout | length > 0
+
+- name: Caddyfile is valid
+  ansible.builtin.command: >-
+    podman run --rm --network none
+    -v {{ roclink_root }}/etc/caddy:/etc/caddy:ro
+    {{ caddy_image }} caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+  args:
+    chdir: /
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+  changed_when: false
+
+- name: Unit
+  ansible.builtin.template:
+    src: caddy.container.j2
+    dest: "{{ roclink_quadlets }}/caddy.container"
+    owner: "{{ roclink_user }}"
+    group: "{{ roclink_user }}"
+    mode: "0644"
+  register: caddy_unit
+
+- name: Running
+  ansible.builtin.systemd:
+    name: caddy.service
+    scope: user
+    daemon_reload: true
+    state: "{{ 'restarted' if (certs is changed or admins is changed or caddyfile is changed or caddy_unit is changed or pull is changed) else 'started' }}"
+  become_user: "{{ roclink_user }}"
+  environment: "{{ roclink_env }}"
+
+- name: The scoreboard, through Caddy
+  ansible.builtin.uri:
+    url: http://{{ ansible_host }}:{{ http_port }}/api/run
+  register: front
+  retries: 10
+  delay: 2
+  until: front.status == 200
+  delegate_to: localhost
+  become: false
+
+- name: The admin pages turn away a browser without a certificate
+  ansible.builtin.command: >-
+    curl -sS -o /dev/null --cacert {{ pki_dir }}/ca.crt
+    https://{{ ansible_host }}:{{ hubapi_https_port }}/api/health
+  delegate_to: localhost
+  become: false
+  register: nocert
+  changed_when: false
+  failed_when: nocert.rc == 0
+
+- name: The admin pages let an admin in
+  ansible.builtin.command: >-
+    curl -sSf -o /dev/null --cacert {{ pki_dir }}/ca.crt
+    --cert {{ pki_dir }}/clients/{{ admin_clients[0] }}.crt
+    --key {{ pki_dir }}/clients/{{ admin_clients[0] }}.key
+    https://{{ ansible_host }}:{{ hubapi_https_port }}/api/health
+  delegate_to: localhost
+  become: false
+  changed_when: false

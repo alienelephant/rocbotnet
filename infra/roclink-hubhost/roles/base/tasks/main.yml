@@ -1,0 +1,141 @@
+# The netinstall may leave only "trixie main" (no security archive, which
+# unattended-upgrades needs) or the install medium in sources.list.
+- name: APT sources
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/debian.sources
+    content: |
+      # Managed by Ansible (infra/roclink-hubhost)
+      Types: deb
+      URIs: http://deb.debian.org/debian
+      Suites: {{ ansible_facts.distribution_release }} {{ ansible_facts.distribution_release }}-updates
+      Components: main non-free-firmware
+      Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+      Types: deb
+      URIs: http://security.debian.org/debian-security
+      Suites: {{ ansible_facts.distribution_release }}-security
+      Components: main non-free-firmware
+      Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+    mode: "0644"
+
+- name: No sources.list (they're all in debian.sources)
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list
+    content: "# Managed by Ansible (infra/roclink-hubhost): see sources.list.d/debian.sources\n"
+    mode: "0644"
+
+- name: Everything up to date
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: dist
+    autoremove: true
+    autoclean: true
+
+- name: Packages
+  ansible.builtin.apt:
+    name:
+      - chrony
+      - unattended-upgrades
+      - apt-listchanges
+      - acl                  # become_user to roclink (ansible's temp files)
+      - ca-certificates
+      - curl
+      - jq
+      - sqlite3              # backups, and looking at the databases
+      - zstd
+      - mosquitto-clients    # roclink watch
+      - rsync
+      - htop
+      - vim-tiny
+      - less
+
+- name: Reboot check (also run at login, in the motd)
+  ansible.builtin.copy:
+    src: reboot-required
+    dest: /usr/local/sbin/reboot-required
+    mode: "0755"
+
+- name: motd says when a reboot is due
+  ansible.builtin.copy:
+    dest: /etc/update-motd.d/90-reboot-required
+    content: |
+      #!/bin/sh
+      /usr/local/sbin/reboot-required >/dev/null && echo "\n*** A reboot is due: $(/usr/local/sbin/reboot-required)\n"
+      exit 0
+    mode: "0755"
+
+- name: Is a reboot due?
+  ansible.builtin.command: /usr/local/sbin/reboot-required
+  register: reboot_due
+  changed_when: false
+  failed_when: false
+
+- name: Reboot
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  when: reboot_due.rc == 0 and allow_reboot | bool
+
+- name: A reboot is due, and allow_reboot is false
+  ansible.builtin.debug:
+    msg: "Not rebooting: {{ reboot_due.stdout }}"
+  when: reboot_due.rc == 0 and not allow_reboot | bool
+
+# --- time: chrony from the Debian pool, and serves the LAN (the gateways), on
+# its own clock if the internet goes.
+- name: chrony serves the LAN
+  ansible.builtin.copy:
+    dest: /etc/chrony/conf.d/roclink.conf
+    content: |
+      # Managed by Ansible (infra/roclink-hubhost)
+      allow {{ hub_lan }}
+      # Keep serving the LAN from this clock when the upstream servers are gone.
+      local stratum 10 orphan
+    mode: "0644"
+  notify: Restart chrony
+
+- name: chrony running
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+
+# --- logs: kept across reboots, bounded
+- name: journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: journald
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/roclink.conf
+    content: |
+      # Managed by Ansible (infra/roclink-hubhost)
+      [Journal]
+      Storage=persistent
+      SystemMaxUse=1G
+      MaxRetentionSec=3month
+    mode: "0644"
+  notify: Restart journald
+
+# --- security updates, unattended; never reboots by itself (the motd says when)
+- name: Unattended upgrades on
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    mode: "0644"
+
+- name: Unattended upgrades settings
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52roclink-unattended
+    content: |
+      // Managed by Ansible (infra/roclink-hubhost)
+      // The origins are Debian's defaults (50unattended-upgrades): the security archive.
+      Unattended-Upgrade::Automatic-Reboot "false";
+      Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::SyslogEnable "true";
+    mode: "0644"

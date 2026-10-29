@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+# The roclink broker: every client logs in, and the ACL says who may read and
+# write what (roclink.acl). The firewall lets only the LAN in.
+per_listener_settings false
+
+# Plain, for this host only: the hub, the game, roclink watch.
+listener {{ mqtt_port }} 127.0.0.1
+
+# The LAN, the gateways: TLS only, so passwords and the payloads gateways
+# decrypted don't cross it in clear. The hub's certificate, from the admin CA.
+listener {{ mqtts_port }}
+certfile /mosquitto/config/certs/server.crt
+keyfile /mosquitto/config/certs/server.key
+tls_version tlsv1.2
+
+allow_anonymous false
+password_file /mosquitto/config/passwd
+acl_file /mosquitto/config/roclink.acl
+max_queued_messages 100000
+
+# The hub's session (client_id roclink-hub, QoS 1) keeps its queue across a
+# broker restart.
+persistence true
+persistence_location /mosquitto/data/
+autosave_interval 300
+
+log_dest stdout
+log_type error
+log_type warning
+log_type notice
+log_type information
+connection_messages true
+log_timestamp false
