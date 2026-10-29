@@ -68,8 +68,15 @@ void loop() {
 
     // roclink: wrap the message in an envelope (9-byte header + your bytes)
     uint8_t frame[ROCLINK_FRAME_MAX_LEN];
-    int len = roclink_client_build_data(&node, SCHEMA_HELLO, (const uint8_t *)data, strlen(data),
-                                        ROCLINK_SEND_DEFAULT, frame, sizeof(frame));
+    int len = roclink_client_build_data(
+      &node, 
+      SCHEMA_HELLO, 
+      (const uint8_t *)data, 
+      strlen(data),
+      ROCLINK_SEND_DEFAULT, 
+      frame, 
+      sizeof(frame)
+    );
 
     if (len < 0) {                                              // roclink: no frame was built,
       Serial.printf("roclink: %s\n", roclink_status_str(len));  // roclink: so send nothing
