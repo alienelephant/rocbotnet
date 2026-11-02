@@ -50,42 +50,13 @@ If the XIAO doesn't show up for uploading, hold BOOT, press RESET, release BOOT,
 
 ## The backend
 
-The proxy is node `0x0302` with the demo key, which the gateway accepts as it is. The hub needs the box's device type, `scavbox` (the same for the LoRa example, [roclink-scavbox-lora](../roclink-scavbox-lora), since it's the same box firmware), and its decoder for schema 32, which must match `struct Press` in `src/main.cpp`:
+The proxy is the XIAO, node `0x0302`, with the demo key, which the gateway accepts as it is; in the game its box is the **Workshop**. The hub and the game are already set up for it: the hub host's configs (`infra/roclink-hubhost/roles/apps/templates/hub.toml.j2` and `game.toml.j2`) and the bench's (`infra/roclink-bench/etc/`) are the reference, so this README doesn't repeat them. They hold the `scavbox` device type, whose decoder for schema 32, `[decoder.scavbox-press]` (`struct = "<HH"`), must match `struct Press` in `src/main.cpp`; every proxy's node in its `[[node]]` list; and a `[[box]]` for each in the game. Each proxy board has its own node address (rfidprox `docs/BOXLINK.md` §9, "Node addresses").
 
-```toml
-[decoder.scavbox-press]
-struct = "<HH"                       # uint16 presses, uint16 held_ms
-fields = ["presses", "held_ms"]
-
-[[device_type]]
-name = "scavbox"
-class = "always_listening"
-schemas = { 32 = "scavbox-press" }
-
-[[node]]
-net = 0x42
-nodes = ["0x0301", "0x0302"]         # the Heltec (LoRa) and the XIAO (Wi-Fi) proxies
-type = "scavbox"
-
-[[route]]                            # add the type to the game's route
-service = "scavhunt"
-net = 0x42
-types = ["scavhunt-box", "scavbox"]
-schemas = [1, 2, 3, 4, 5, 10, 11]
-```
-
-The game needs the box and a team with the dummy fob:
-
-```toml
-[[box]]
-id = "workshop"
-name = "Workshop (XIAO)"
-net = 0x42
-node = 0x0302
-```
+What the game needs at run time is a team with the proxy's dummy fob, and the run started:
 
 ```bash
-scavhunt team xiao --name "XIAO fob" --token f0b00302
+roclink scavhunt team xiao --name "XIAO fob" --token f0b00302
+roclink scavhunt start
 ```
 
 ## Running the demo

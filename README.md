@@ -8,6 +8,8 @@ Everything for the roclink scavenger hunt: the protocol, the gateway, the hub an
                     forwarding)  secured        mosquitto
 ```
 
+The scoreboard is on `:8090` on the bench Mac (`infra/roclink-bench`). The hub host (`infra/roclink-hubhost`) serves it at `http://<hub>/`, through Caddy, and keeps `:8090` to itself.
+
 | Folder | Project | What it is |
 |---|---|---|
 | `protocol/` | `roclink-rfc` | The roclink wire protocol (docs/PROTOCOL.md) and its C library, used by the proxies and the gateway |

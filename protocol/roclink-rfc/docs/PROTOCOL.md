@@ -2,13 +2,38 @@
 
 This document is normative. The C library in `src/` implements it, but you don't need the library to take part. A client or server written in any language interoperates if it follows this document and reproduces the [test vectors](#11-test-vectors) byte for byte.
 
-**Status:** draft for review (roclink 0.3), wire format v1.
+**Status:** current, roclink 0.3, wire format v1. This is the master document for roclink: when another document disagrees with it, this one is right. Its companions cover what it leaves out: [SECURITY.md](SECURITY.md), the threat model and deployment requirements, and [GATEWAY_INTERFACE.md](../../../hub/roclink-hub/docs/GATEWAY_INTERFACE.md), how gateways hand frames to a hub.
 
 **Scope:** nodes and gateways: the frames between them, and the rules each follows. What a gateway does with frames afterwards, and the system behind it (*the hub*), are out of scope: GATEWAY_INTERFACE.md drafts how gateways talk to a hub, as a separate RFC, and the hub's design is left open. The wire protocol needs only a few things from the hub, all listed in [§9.1](#91-what-the-hub-must-do).
 
 The wire format is meant to stay stable. New features use the code points it reserves for them: frame types, schema-0 control operations ([§7.1](#71-control-messages)) and security suites ([§12](#12-reserved-space-and-versioning)).
 
 The library in `src/` implements it, including the security extension ([§10](#10-security)) and the 0.3 changes listed in [§13.1](#131-changes-in-03), including the node's `PING` ([§7.1](#71-control-messages)), except session mode ([§10.8](#108-sessions)), which is specified but not built yet. Open questions are collected in [§14](#14-open-questions), and work left for later in [§15](#15-future-work). The threat model is in [SECURITY.md](SECURITY.md).
+
+## Goals and prior art
+
+roclink is built for a public makerspace, where many makers share gateways and one hub.
+
+1. **A protocol to learn from:** short, fixed, little-endian, fully written down, with test vectors.
+2. **Any radio:** makers pick what reaches their spot and only define their device's data model.
+3. **Simple and secure:** security comes in levels (`none`, `auth`, `enc`), so the plain frame can be studied on its own.
+4. **Usable without understanding it:** a C99 library with no dependencies, and this document for those who want to dig in.
+
+**Prior art, and why not:** LoRaWAN is LoRa-only and needs a network server. Thread and Matter need specific radios and a large stack. ESPHome is Wi-Fi and Home Assistant only. MySensors has small payloads and fixed message types. RadioHead has no security and no spec. roclink borrows from several: frame counters and bound ACKs from LoRaWAN, CCM from Zigbee, Thread and BLE, and device classes from LoRaWAN.
+
+**Compared with the two closest options, for a maker:**
+
+| | roclink | MySensors | Matter |
+|---|---|---|---|
+| Radios | any: LoRa, ESP-NOW, Wi-Fi, HaLow, 433 MHz, nRF24 | nRF24, RFM69, RFM95, RS485 | Wi-Fi, Ethernet, Thread (BLE to set up) |
+| Smallest board | Arduino Uno, secured (17 KB flash) | Arduino Uno | ESP32-C6/H2, nRF52840 class |
+| Payload | up to 233 B secured | 25 B on nRF24 | larger, over IP |
+| Data model | yours, one schema per format | fixed sensor and value types | standard clusters |
+| Shows up in Home Assistant by itself | no: you write a decoder | yes | yes |
+| Security | on by default, per-node keys | opt-in; shared network key | strong; QR-code onboarding |
+| Licence | MIT | GPL | Apache 2.0 SDK; certification for products |
+
+roclink's main trade-off: any radio and full control of the payload, in exchange for writing your own decoders. A self-description control message could close part of that gap ([§15](#15-future-work) item 5).
 
 ## 1. Model
 
@@ -46,6 +71,20 @@ roclink has no protocol identifier in its header, by design. Whether a frame is 
 - **If roclink does share a channel** with another protocol (MySensors on the same LoRa settings, other ESP-NOW applications on the same Wi-Fi channel), each side receives the other's packets. They don't get mistaken for data: a foreign frame passes roclink's header checks very rarely (version, type, `netId` and a destination of this gateway or `0x0000` together match about 1 in 300 million random frames), and a secured frame must also pass its tag. They are dropped and counted as `malformed`, `net` or `addr`. What they do cost is airtime: two protocols on one channel corrupt each other's packets when they overlap, whatever their headers say.
 - **On 2.4 GHz, plan channels** so Wi-Fi and ESP-NOW, 802.15.4 (Thread, Zigbee), BLE and nRF24 don't overlap: for example Wi-Fi on 1, 6 or 11, and 802.15.4 on 15, 20, 25 or 26.
 - **One gateway host can serve several protocols** with one radio and one gateway stack per protocol, each forwarding upstream separately. Matter is the exception: Matter devices are IP hosts with end-to-end encryption, so a host serving them runs a Thread border router, which routes their packets without reading them.
+
+```mermaid
+flowchart LR
+    subgraph host [One gateway host]
+        R1[LoRa radio] --> GW1[roclink gateway]
+        R2[nRF24 radio] --> GW2[MySensors gateway]
+        R3[802.15.4 radio] --> BR[Thread border router]
+    end
+    GW1 -->|roclink topics| MQ[(MQTT broker)]
+    GW2 -->|MySensors topics| MQ
+    BR -->|IPv6, encrypted end to end| MS[Matter controller]
+    MQ --> HUB[Hub / Home Assistant]
+    MS --> HUB
+```
 
 Transport security (WPA2, ESP-NOW encryption, TLS) may be used as well, but roclink doesn't rely on it. LoRa and nRF24 have none. A gateway's onward link (MQTT, a host connection) should always use TLS or equivalent.
 
@@ -354,6 +393,19 @@ The label is ASCII. `node` is the node's address (LE), `epoch` a 32-bit LE value
 | **Chain key** `CK(e+1)` | `KDF(CK(e), "roclink chain", netId \|\| node \|\| key_gen \|\| e+1)` | the node and its gateway: current epoch only |
 | **Frame key** `FK(e)`, the AES-CCM key | `KDF(CK(e), "roclink frame", netId \|\| node \|\| key_gen \|\| e)` | computed from `CK(e)` |
 | **Session key** `SK`, the AES-CCM key in session mode | `KDF(CK(e), "roclink session", netId \|\| node \|\| key_gen \|\| join_fcnt \|\| gateway \|\| gw_fcnt)` | the node and the one gateway it joined, in RAM only ([§10.8](#108-sessions)) |
+
+```mermaid
+flowchart LR
+    M["Master key<br/>(provisioning tool, offline)"] -->|node key| CK0["CK(0)"]
+    CK0 -->|chain| CK1["CK(1)"] -->|chain| CK2["CK(2), current"] -->|chain| CK3["CK(3) ..."]
+    CK0 --> FK0["FK(0)"]
+    CK1 --> FK1["FK(1)"]
+    CK2 --> FK2["FK(2): AES-CCM key"]
+    style CK0 stroke-dasharray: 4 3
+    style CK1 stroke-dasharray: 4 3
+```
+
+The dashed chain keys are erased once the chain has moved past them.
 
 **Epochs and the ratchet (forward secrecy):**
 - **The epoch comes from the node's frame counter:** `e = fcnt >> 16`. A node frame uses `FK(e)` for its own `fcnt`. A gateway frame uses `FK(e)` for the `fcnt` of the node frame that opened the reply (§10.6), so both directions of an exchange use the node's chain.

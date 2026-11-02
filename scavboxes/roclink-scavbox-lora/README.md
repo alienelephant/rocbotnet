@@ -50,36 +50,13 @@ The DevKit's RGB LED is green while a team is logged in. On a v1.1 DevKit the LE
 
 ## The backend
 
-The proxy is node `0x0301` with the demo key, which the gateway accepts as it is. The hub's device type for the box is the same as the Wi-Fi example's, `scavbox`, since it's the same box firmware: its decoder for schema 32 must match `struct Press` in `src/main.cpp`.
+The proxy is the Heltec, node `0x0301`, with the demo key, which the gateway accepts as it is; in the game its box is the **Tower**. The hub and the game are already set up for it: the hub host's configs (`infra/roclink-hubhost/roles/apps/templates/hub.toml.j2` and `game.toml.j2`) and the bench's (`infra/roclink-bench/etc/`) are the reference, so this README doesn't repeat them. They hold the `scavbox` device type, whose decoder for schema 32, `[decoder.scavbox-press]` (`struct = "<HH"`), must match `struct Press` in `src/main.cpp`; every proxy's node in its `[[node]]` list; and a `[[box]]` for each in the game. Each proxy board has its own node address (rfidprox `docs/BOXLINK.md` §9, "Node addresses").
 
-```toml
-[decoder.scavbox-press]
-struct = "<HH"                       # uint16 presses, uint16 held_ms
-fields = ["presses", "held_ms"]
-
-[[device_type]]
-name = "scavbox"
-class = "always_listening"
-schemas = { 32 = "scavbox-press" }
-
-[[node]]
-net = 0x42
-nodes = ["0x0301", "0x0302"]         # the Heltec (LoRa) and the XIAO (Wi-Fi) proxies
-type = "scavbox"
-```
-
-The game needs the box and a team with the dummy fob:
-
-```toml
-[[box]]
-id = "tower"
-name = "Tower (Heltec LoRa)"
-net = 0x42
-node = 0x0301
-```
+What the game needs at run time is a team with the proxy's dummy fob, and the run started:
 
 ```bash
-scavhunt team heltec --name "Heltec fob" --token f0b00301
+roclink scavhunt team heltec --name "Heltec fob" --token f0b00301
+roclink scavhunt start
 ```
 
 ## Running the demo

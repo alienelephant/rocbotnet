@@ -6,7 +6,8 @@
 // the gateway and published on MQTT, but no GRANT comes back: the display says
 // so. When rfidauth exists, a GRANT shows the user's label.
 //
-// Not here yet: the session state machine, boxlink, LoRa (PLAN_WIFI_EXAMPLE.md).
+// Not here: the session state machine (docs/DESIGN.md). The game-box build,
+// gamebox.cpp, has boxlink and LoRa.
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>

@@ -1,18 +1,17 @@
-# roclink: wire protocol v1 (RFC for 0.3)
+# roclink: wire protocol v1 (roclink 0.3)
 
 roclink is a small envelope for messages between sensor and actuator boards (*nodes*) and the *gateways* that receive them, over any radio: LoRa, ESP-NOW, Wi-Fi/UDP and others. Frames are authenticated and encrypted by default.
 
-This repository holds the RFC for review, the normative spec it summarises, and a minimal reference implementation with tests and Arduino examples.
+This folder holds the protocol's master document, its threat model, and a minimal reference implementation with tests and Arduino examples.
 
 ## Documents
 
 | | |
 |---|---|
-| [docs/RFC_DRAFT.md](docs/RFC_DRAFT.md) | **Start here.** The RFC: goals, scope, frame format, flows, security, open questions |
-| [docs/PROTOCOL.md](docs/PROTOCOL.md) | The normative wire protocol between nodes and gateways, with test vectors |
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | **Start here, and the master.** The wire protocol between nodes and gateways: goals, frame format, exchanges, security, test vectors, open questions |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model and deployment requirements |
 
-How gateways hand data to a hub is a separate draft, and isn't part of this RFC.
+How gateways hand data to a hub is in [GATEWAY_INTERFACE.md](../../hub/roclink-hub/docs/GATEWAY_INTERFACE.md), with the hub.
 
 ## The library
 

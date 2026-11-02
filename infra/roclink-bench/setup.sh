@@ -38,10 +38,12 @@ secret() { printf '%s\n' "$VAULT" | sed -n "s/^$1: *\"\(.*\)\"/\1/p"; }
 umask 077
 secret vault_mqtt_scavhunt > "$R/etc/scavhunt-mqtt-password"
 secret vault_mqtt_admin > "$R/etc/admin-mqtt-password"
-render_hub() {
-    HUB_PASSWORD=$(secret vault_mqtt_roclink_hub) /usr/bin/python3 -c '
+# The configs with this Mac's paths (@ROCLINK_DIR@: $R) and the hub's password filled in.
+render() {
+    HUB_PASSWORD=$(secret vault_mqtt_roclink_hub) ROCLINK_DIR=$R /usr/bin/python3 -c '
 import os, sys
-sys.stdout.write(open(sys.argv[1]).read().replace("@HUB_PASSWORD@", os.environ["HUB_PASSWORD"]))' "$HERE/etc/hub.toml.in"
+text = open(sys.argv[1]).read().replace("@ROCLINK_DIR@", os.environ["ROCLINK_DIR"])
+sys.stdout.write(text.replace("@HUB_PASSWORD@", os.environ["HUB_PASSWORD"]))' "$1"
 }
 for f in hub.toml game.toml; do
     if [ -f "$R/etc/$f" ] && [ "$CONFIGS" != --configs ]; then
@@ -49,7 +51,7 @@ for f in hub.toml game.toml; do
         continue
     fi
     [ -f "$R/etc/$f" ] && cp "$R/etc/$f" "$R/etc/$f.bak"
-    if [ $f = hub.toml ]; then render_hub > "$R/etc/$f"; else cp "$HERE/etc/$f" "$R/etc/$f"; fi
+    if [ $f = hub.toml ]; then render "$HERE/etc/hub.toml.in" > "$R/etc/$f"; else render "$HERE/etc/$f" > "$R/etc/$f"; fi
     echo "   wrote $R/etc/$f"
 done
 umask 022
