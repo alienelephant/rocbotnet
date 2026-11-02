@@ -122,12 +122,33 @@ bool begin(DownlinkHandler on_downlink) {
     store.begin("roclink", false);
     uint8_t rec[20];
     uint32_t epoch = 0;
-    if (store.getBytes("key", rec, sizeof(rec)) != sizeof(rec)) {
-        store_key(provisioned, 0);  // first boot
-        memcpy(rec + 4, provisioned, 16);
-    } else {
-        memcpy(&epoch, rec, 4);
+    // The stored key is the one the board first booted with. It belongs to the
+    // node it was then: flashed as another node, the board starts that node's
+    // key afresh, or it would sign as the new address with the old one's key
+    // (the gateway refuses that: "auth"). The counter starts afresh too, for a
+    // new node. Firmware before this stored no identity: then a key still at
+    // epoch 0 that isn't this build's is taken for another node's, or an old
+    // key, and replaced, keeping the counter.
+    const uint32_t id = (uint32_t)ROCLINK_NET << 16 | ROCLINK_NODE;
+    const uint32_t stored_id = store.getULong("id", 0);
+    bool have = store.getBytes("key", rec, sizeof(rec)) == sizeof(rec);
+    if (have) memcpy(&epoch, rec, 4);
+    if (have && stored_id && stored_id != id) {
+        Serial.printf("[link] the stored key is node %02lX/%04lX's: starting node %02X/%04X afresh\n",
+                      (unsigned long)(stored_id >> 16), (unsigned long)(stored_id & 0xFFFF), ROCLINK_NET,
+                      ROCLINK_NODE);
+        store.remove("fcnt");
+        have = false;
+    } else if (have && epoch == 0 && memcmp(rec + 4, provisioned, 16) != 0) {
+        Serial.println("[link] the stored key isn't this build's (another node's, or an old one): replacing it");
+        have = false;
     }
+    if (!have) {
+        store_key(provisioned, 0);  // first boot, or a new identity
+        memcpy(rec + 4, provisioned, 16);
+        epoch = 0;
+    }
+    if (stored_id != id) store.putULong("id", id);
     roclink_sec_config_t sc;
     roclink_sec_config_default(&sc);  // enc, 8-byte tags
     sc.net_id = ROCLINK_NET;

@@ -7,7 +7,7 @@ The running roclink hub and scavenger hunt on the bench Mac. The [top-level READ
 | `setup.sh` | Installs or updates the hub and the game from `../../hub` (editable), writes `~/roclink/etc` from `etc/` with the secrets from the gateway's vault, and links `roclink` into `~/bin` |
 | `roclink` | `start`, `stop`, `restart`, `status`, `logs`, `watch` (the broker, as admin), and `scavhunt …` (the game's operator commands) |
 | `etc/hub.toml.in` | The hub's config: the Pi's broker, the boxes' device types and decoders, the route to the game. `@HUB_PASSWORD@` is filled in from the vault |
-| `etc/game.toml` | The game: its boxes (the real ones: the Heltec's Tower, the XIAO's Workshop), scoring, the scoreboard |
+| `etc/game.toml` | The game: its boxes (the real ones: the Heltec's Tower, the XIAO's Workshop, the Pico 2 W's Lab), scoring, the scoreboard |
 | `rocbotnet.code-workspace` | VS Code: every project as a folder (`code rocbotnet.code-workspace`); PlatformIO finds the firmware projects |
 
 ## The running bench

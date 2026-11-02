@@ -12,6 +12,12 @@
 // (DUMMY_FOB in config.h); held 1.5 s, it logs out. Box data and game events
 // are only forwarded while someone is logged in.
 //
+// Built with AUTO_LOGIN=1 (xiao_gamebox_auto), it needs no button: it logs in
+// with the dummy fob as soon as its link is up, and tries again every
+// AUTO_LOGIN_RETRY_MS until the game says go (the run may not be started yet,
+// or the team not entered), and whenever the session ends without the box
+// solved. Once it's solved, it stays logged out until it restarts.
+//
 // The Heltec shows the state on its OLED. The XIAO has no display: its user LED
 // blinks with no link, is off when ready, flickers while waiting for the game,
 // and stays on while someone is logged in; the serial log has the details.
@@ -37,16 +43,21 @@ static HardwareSerial &box = Serial1;
 
 static constexpr uint32_t VERDICT_TIMEOUT_MS = 10000;
 static constexpr uint32_t DATA_MIN_MS = 250;   // BOXLINK.md 9: at most four DATA frames a second
+static constexpr uint32_t TRIGGER_MIN_MS = 1000;  // and one trigger a second: each WRONG costs the team time
 static constexpr uint32_t REPEAT_MS = 10000;   // a seq seen again this soon is the box's retry
 static constexpr uint32_t LOGOUT_HOLD_MS = 1500;
+static constexpr uint32_t AUTO_LOGIN_RETRY_MS = 15000;
 static constexpr uint8_t NO_ACK = 0xFF;        // handle(): answered some other way
 
 // --- state
 enum class State { joining, linking, idle, waiting };  // waiting: for the game's verdict
 static State state = State::joining;
-static uint32_t last_ping_ms, link_retry_ms, sent_ms, last_data_ms;
+static uint32_t last_ping_ms, link_retry_ms, sent_ms, last_data_ms, last_trigger_ms;
 static uint16_t session, next_session = 1;  // the session id while someone is logged in, else 0
 static uint8_t hints_taken;
+static bool auto_login = AUTO_LOGIN;  // still to log in by itself: cleared once the box is solved
+static bool auto_tried;
+static uint32_t auto_login_ms;        // its last try
 static const uint8_t fob[] = DUMMY_FOB;
 static char headline[22] = "Starting";
 static char detail[22] = "";
@@ -208,6 +219,8 @@ static void on_verdict(const uint8_t *p, size_t len) {
     } else if (result == 9 && arg > hints_taken) {
         hints_taken = (uint8_t)arg;
     } else if (result <= 2) {  // solved: the box resets for the next team
+        if (auto_login) Serial.println("[game] solved: not logging in again until restarted");
+        auto_login = false;    // or it would log in, hear "already solved", and again
         close_session(CLOSED_BOX_ENDED);
     } else if (result == 8) {  // the game has no session for this team
         close_session(CLOSED_EXPIRED);
@@ -290,6 +303,8 @@ static uint8_t on_trigger(uint8_t what, uint8_t arg) {
     if (!session) return boxlink::REFUSED_NO_SESSION;
     if (state == State::waiting) return boxlink::REFUSED_BUSY;
     if (!link_up()) return boxlink::REFUSED_OFFLINE;
+    if (last_trigger_ms && millis() - last_trigger_ms < TRIGGER_MIN_MS) return boxlink::REFUSED_BUSY;
+    last_trigger_ms = millis();
     uint8_t hint = schema == game::HINT ? (arg ? arg : (uint8_t)(hints_taken + 1)) : 0;
     if (!game_send(schema, hint)) return boxlink::REFUSED_OFFLINE;
     if (schema == game::WRONG) show("Wrong answer", "costs time");
@@ -448,7 +463,9 @@ void loop() {
             if (link_retry_ms && millis() - link_retry_ms < 3000) break;
             if (rlink::ping()) {
                 Serial.println("[scavbox] PING ACKed: ready");
-                show(session ? "Linked" : "Press button", session ? "session kept" : "to log in");
+                if (session) show("Linked", "session kept");
+                else if (auto_login) show("Linked", "logging in");
+                else show("Press button", "to log in");
                 link_retry_ms = 0;
                 last_ping_ms = millis();
                 set_state(State::idle);
@@ -472,6 +489,13 @@ void loop() {
                 bool ok = rlink::ping();
                 Serial.printf("[link] PING: %s\n", ok ? "ACKed" : "no ACK");
                 if (!ok) set_state(State::linking);
+            }
+            if (state == State::idle && auto_login && !session &&
+                (!auto_tried || millis() - auto_login_ms >= AUTO_LOGIN_RETRY_MS)) {
+                auto_tried = true;
+                auto_login_ms = millis();
+                Serial.println("[game] logging in by itself (AUTO_LOGIN)");
+                login();
             }
             break;
     }

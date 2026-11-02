@@ -10,6 +10,9 @@
 - name: roclink hub host
   hosts: hub
   become: true
+  # A failed task mustn't strand a change: a rewritten config whose handler
+  # never ran would look done to the next run, and never be applied.
+  force_handlers: true
   pre_tasks:
     - name: Logged in as the admin, with the key
       ansible.builtin.assert:

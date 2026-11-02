@@ -69,7 +69,7 @@ The payload limit is 200 bytes so that, with the session id and roclink's overhe
 | 9 | `TRIGGER` | box → proxy | `trigger` u8, `arg` u8: a game event (§9) |
 | 10 | `VERDICT` | proxy → box | `result` u8, `arg` u16, `solved` u8, `required` u8: the game's answer (§9) |
 
-The proxy sends `STATUS` whenever the link state or the session changes, and in answer to `PING` when the box sets `ACK_REQ`.
+The proxy sends `STATUS` whenever the link state or the session changes, and in answer to every `PING`. Frames from the proxy to the box ask for no `ACK`, so a box that lost one finds out from the next `STATUS`: BoxLink's keepalive `PING` (§8) is sent without `ACK_REQ`, just for that answer. BoxLink also takes a `no_session` refusal to mean the session is closed.
 
 ### 4.1 Link
 
@@ -138,7 +138,7 @@ sequenceDiagram
 
 ## 8. Liveness
 
-- The box sends something at least every 5 s; `PING` if it has nothing else.
+- The box sends something at least every 5 s; `PING` if it has nothing else. BoxLink's `poll()` does this.
 - The proxy considers the box gone after 15 s of silence, and closes any session with `box_lost`.
 - A box that restarts sends `HELLO`. If a session was open, the proxy closes it (`box_lost`): the box has lost its state, so the user taps again.
 
@@ -146,7 +146,7 @@ sequenceDiagram
 
 What the scavenger hunt demo runs today, before rfidauth and GAME.md 0.3. It's this protocol with these differences:
 
-**Logging in.** There's no fob reader: a button on the proxy logs in with a dummy fob (`f0b0` and the node address: `f0b00301` for `0x0301`), and holding it 1.5 s logs out. The proxy then sends `SESSION_OPEN` (label `fob f0b00301`, lifetime 0: no expiry) or `SESSION_CLOSED`.
+**Logging in.** There's no fob reader: a button on the proxy logs in with a dummy fob (`f0b0` and the node address: `f0b00301` for `0x0301`), and holding it 1.5 s logs out. The proxy then sends `SESSION_OPEN` (label `fob f0b00301`, lifetime 0: no expiry) or `SESSION_CLOSED`. Built with `AUTO_LOGIN=1` (`xiao_gamebox_auto`), it needs no button: it logs in with the dummy fob once its link is up, tries again every 15 s until the game answers go, and again whenever the session ends with the box unsolved. Once the box is solved it stays logged out until it restarts, since logging in would only hear "already solved".
 
 **Box data is forwarded unchanged,** without the session id of §6: a `DATA` frame on schema *s* becomes a roclink frame on schema *s* with exactly the box's bytes. The box decides what the bytes mean; the hub's config declares the layout (roclink-hub README, "Payload decoders"), so the proxy never needs to know. Like §6.2's gate, box data needs a session: with no one logged in it's refused `no_session` and nothing leaves the proxy. At most four `DATA` frames a second: faster ones are refused `busy`.
 
@@ -174,7 +174,7 @@ Downlink on schemas 32–255 from the hub comes back to the box the same way, as
 | 3 | hint | `HINT` | the hint number; 0 for the next one |
 | 4 | end: the team gave up | `END` (the session closes) | |
 
-A trigger needs a session (`no_session` otherwise), and one waiting for the game's verdict refuses the next (`busy`). `END_SESSION` (op 7) works as trigger 4.
+A trigger needs a session (`no_session` otherwise), and one waiting for the game's verdict refuses the next (`busy`). At most one trigger a second: faster ones are refused `busy`, so a bouncing button can't send a run of `WRONG`s, each costing the team time. `END_SESSION` (op 7) works as trigger 4.
 
 **Verdicts** come back as `CTRL VERDICT` (op 10), with GAME.md §6's result codes: 0 solved, 1 solved and finished, 2 already solved, 3 locked (`arg`: the box to solve first), 4 unknown team, 5 not running, 6 go (`arg`: hints taken), 7 busy (`arg`: seconds), 8 no session, 9 hint granted (`arg`: its number), 10 no more hints.
 
@@ -194,6 +194,23 @@ A trigger needs a session (`no_session` otherwise), and one waiting for the game
 | Box port: box TX → proxy RX | GPIO 39 (J3-10) | GPIO 44 (D7) |
 | Login button | PRG, on the board | a push button from D0 (GPIO 1) to GND |
 | Shows the state on | the OLED | the user LED: blinking, no link; off, ready; flickering, waiting for the game; on, logged in |
+
+**Node addresses.** Each proxy board has its own node address, and two running boards must never share one. Each has its own key and frame counter, and a gateway drops the frames of whichever board's counter is behind as replays (roclink-gateway OPERATIONS.md, "Troubleshooting"): that board gets no ACKs, though the gateway is up.
+
+| Node | Board | Build | Dummy fob |
+|---|---|---|---|
+| `0x0301` | the Heltec | `heltec_v3_gamebox`, `heltec_v3_gamebox_lora`, `heltec_v4_gamebox` | `f0b00301` |
+| `0x0302` | a XIAO with a login button | `xiao_gamebox` | `f0b00302` |
+| `0x0303` | a XIAO with no button, logging in by itself | `xiao_gamebox_auto` | `f0b00303` |
+
+The Heltec's builds share `0x0301` because they're one board. For another proxy, take the next address (`0x0304`), and:
+
+1. its key: `python3 tools/provision.py --demo 0304` in roclink-rfc, as another `#elif` in `config.h` (or your own master's key in `secrets.h`);
+2. its build: a `platformio.ini` environment with `-D ROCLINK_NODE=0x0304`;
+3. the hub: the address in the `scavbox` `[[node]]` list of `hub.toml` (roclink-hubhost `roles/apps/templates/hub.toml.j2`, and roclink-bench's);
+4. the game: a `[[box]]` with `node = 0x0304` in `game.toml`, and a team with its dummy fob (`roclink scavhunt team … --token f0b00304`).
+
+The gateway needs nothing: it derives each node's key from the network's master key.
 
 Wire GND too. Both are 3.3 V. `roclink-scavbox-wifi` is a box for the XIAO example, and `roclink-scavbox-lora` (an ESP32-S3 DevKit) for the Heltec over LoRa.
 

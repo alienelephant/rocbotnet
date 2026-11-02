@@ -44,9 +44,11 @@ net = 0x42
 nodes = ["0x0200-0x02FF"]
 type = "scavhunt-box"
 
-# The scavbox examples: an ESP32 box behind a proxy, the XIAO over Wi-Fi at
-# 0x0302 (roclink-scavbox-wifi), the Heltec over LoRa at 0x0301
-# (roclink-scavbox-lora). Its schema 32 is its own: press count and hold time.
+# The scavbox examples: a box behind a proxy, the XIAO over Wi-Fi at 0x0302
+# (roclink-scavbox-wifi), the Heltec over LoRa at 0x0301 (roclink-scavbox-lora),
+# and the XIAO that logs in by itself at 0x0303 (roclink-scavbox-picow). One
+# address per proxy board (rfidprox docs/BOXLINK.md 9). Their schema 32 is
+# their own: press count and hold time.
 [decoder.scavbox-press]
 struct = "<HH"
 fields = ["presses", "held_ms"]
@@ -58,7 +60,7 @@ schemas = { 32 = "scavbox-press" }
 
 [[node]]
 net = 0x42
-nodes = ["0x0301", "0x0302"]
+nodes = ["0x0301", "0x0302", "0x0303"]
 type = "scavbox"
 
 [[route]]

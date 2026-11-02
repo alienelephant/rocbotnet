@@ -60,7 +60,13 @@ public:
     int begin(const char *box_type, uint16_t box_version);
 
     // Call often (every loop()): reads what the proxy sent and calls the handlers.
+    // When the box has sent nothing for 5 s, it also sends a PING, which the
+    // proxy answers with its STATUS: that keeps in_session() and link_up() right
+    // even if a frame from the proxy was lost.
     void poll();
+
+    // Asks the proxy for its STATUS and waits for the answer: OK, or NO_ANSWER.
+    int ping();
 
     // Sends the box's own data on `schema` (32-255), at most 200 bytes, and
     // waits for the proxy's answer (up to about 6 s). OK once it's forwarded.
@@ -72,13 +78,17 @@ public:
     }
 
     // Reports a game event: WIN, FAIL, END, or HINT with the hint number (0:
-    // the next one). Needs a session: someone logged in at the proxy.
+    // the next one). Needs a session: someone logged in at the proxy. At most
+    // one a second: the proxy refuses faster ones (REFUSED_BUSY).
     int trigger(uint8_t what, uint8_t arg = 0);
 
     bool in_session() const { return session_ != 0; }
     bool link_up() const { return link_ == boxlink::LINK_UP; }
 
-    // Handlers, called from poll() (and while send() or trigger() wait).
+    // Handlers, called from poll(), and while begin(), send(), trigger() and
+    // ping() wait: a VERDICT can arrive before the ACK of the trigger that
+    // asked for it. Calling send(), trigger() or ping() from a handler then
+    // returns REFUSED_BUSY at once; note what to do, and do it in loop().
     void on_session(void (*fn)(bool open)) { on_session_ = fn; }
     void on_verdict(void (*fn)(const Verdict &v)) { on_verdict_ = fn; }
     void on_data(void (*fn)(uint8_t schema, const uint8_t *data, size_t length)) { on_data_ = fn; }
@@ -87,6 +97,7 @@ private:
     int request(uint8_t type, uint8_t schema, const void *data, size_t length);
     void transmit(const boxlink::Frame &f);
     void handle(const boxlink::Frame &f);
+    void set_session(uint16_t session);  // calls on_session if it opened or closed
 
     Stream &port_;
     boxlink::Decoder decoder_ = {};
@@ -96,6 +107,7 @@ private:
     bool waiting_ = false;
     uint8_t waiting_seq_ = 0;
     int answer_ = NO_ANSWER;
+    uint32_t last_tx_ms_ = 0;
     void (*on_session_)(bool) = nullptr;
     void (*on_verdict_)(const Verdict &) = nullptr;
     void (*on_data_)(uint8_t, const uint8_t *, size_t) = nullptr;

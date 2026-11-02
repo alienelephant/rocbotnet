@@ -1,6 +1,6 @@
 # Beszel
 
-Beszel's hub runs on the hub host, at `https://192.168.8.134/` (behind a client certificate: [admin-certs.md](admin-certs.md)). It connects to an agent on each machine over SSH, with its own key. The agents let in only that key, which the hub's playbook saves as `beszel-hub.pub` (committed; the gateway playbook reads it).
+Beszel's hub runs on the hub host, at `https://192.168.8.134:8443/` (behind a client certificate: [admin-certs.md](admin-certs.md)). It connects to an agent on each machine over SSH, with its own key. The agents let in only that key, which the hub's playbook saves as `beszel-hub.pub` (committed; the gateway playbook reads it).
 
 | Agent | Where | Address to give Beszel |
 |---|---|---|
@@ -9,7 +9,7 @@ Beszel's hub runs on the hub host, at `https://192.168.8.134/` (behind a client 
 
 ## The first time
 
-1. Open `https://192.168.8.134/` and create the admin account (the first visitor makes it; the client certificate is what keeps others from being first). Put its password in your password manager.
+1. Open `https://192.168.8.134:8443/` and create the admin account (the first visitor makes it; the client certificate is what keeps others from being first). Put its password in your password manager.
 2. **Add System** → name `roclink-hub`, host `127.0.0.1`, port `45876`. Ignore the install command it offers: the agent's already running. It turns green within a minute.
 
 ## The gateways

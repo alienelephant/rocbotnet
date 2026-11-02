@@ -162,3 +162,8 @@
     state: absent
     purge: true
   when: unwanted_packages | select('in', ansible_facts.packages) | list | length > 0
+
+# The new firewall, sshd and sysctl settings take effect now, not at the end of
+# the play: the later roles check their ports from outside, through this firewall.
+- name: Apply the changes now
+  ansible.builtin.meta: flush_handlers

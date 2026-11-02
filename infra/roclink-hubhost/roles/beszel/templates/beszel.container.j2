@@ -8,7 +8,7 @@ ContainerName=beszel
 # Host network: it reaches this host's agent on 127.0.0.1, and the gateways' on the LAN.
 Network=host
 Exec=serve --http 127.0.0.1:{{ beszel_port }}
-Environment=APP_URL=https://{{ ansible_host }}
+Environment=APP_URL=https://{{ ansible_host }}:{{ beszel_https_port }}
 Volume={{ roclink_root }}/data/beszel:/beszel_data
 ReadOnly=true
 NoNewPrivileges=true

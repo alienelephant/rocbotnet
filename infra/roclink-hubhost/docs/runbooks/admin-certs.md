@@ -1,6 +1,6 @@
 # Admin client certificates
 
-The admin pages (`https://192.168.8.134/` for Beszel, `:8443` for the hub's API) let in only a browser that presents a client certificate of someone in `admin_clients` (`group_vars/all/main.yml`). Without one the TLS handshake fails: the browser shows a connection error, not a page.
+The admin pages (`https://192.168.8.134:8443/` for Beszel, `:9443` for the hub's API) let in only a browser that presents a client certificate of someone in `admin_clients` (`group_vars/all/main.yml`). Without one the TLS handshake fails: the browser shows a connection error, not a page.
 
 Everything is made on your machine by `roles/pki`, in `pki/` (git-ignored, back it up with `.vault-pass`):
 
@@ -24,13 +24,13 @@ The `.p12` files' passphrase is `vault_p12_password`: `ansible-vault view group_
    - Chrome, Edge (Linux): Manage certificates → Your certificates → Import.
    - macOS: open the `.p12` (it goes into the login keychain).
    - Windows: double-click the `.p12`, Current User.
-3. Open `https://192.168.8.134/`. The browser asks which certificate to present; choose "roclink hub admin (<name>)".
+3. Open `https://192.168.8.134:8443/`. The browser asks which certificate to present; choose "roclink hub admin (<name>)".
 
 From a shell:
 
 ```bash
 curl --cacert pki/ca.crt --cert pki/clients/<name>.crt --key pki/clients/<name>.key \
-  https://192.168.8.134:8443/api/nodes
+  https://192.168.8.134:9443/api/nodes
 ```
 
 ## Issuing one for someone else

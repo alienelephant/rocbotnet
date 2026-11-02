@@ -15,7 +15,7 @@ Everything for the roclink scavenger hunt: the protocol, the gateway, the hub an
 | `hub/` | `roclink-hub` | The hub: MQTT in, SQLite, routing to services, downlink, declared payload decoders |
 | `hub/` | `roclink-scavhunt` | The game: rules, the hub service, the scoreboard. `tools/scavbox.py` simulates boxes |
 | `rfidproxies/` | `rfidprox` | The proxy firmware (Heltec V3/V4, XIAO ESP32-S3; Wi-Fi or LoRa), `boxlink/` (the box's library) and `tools/boxsim.py` |
-| `scavboxes/` | `roclink-scavbox-wifi`, `roclink-scavbox-lora` | Demo puzzle boxes: the ESP32 behind the XIAO (Wi-Fi), the ESP32-S3 behind the Heltec (LoRa) |
+| `scavboxes/` | `roclink-scavbox-wifi`, `roclink-scavbox-lora`, `roclink-scavbox-picow` | Demo puzzle boxes: the ESP32 behind the XIAO (Wi-Fi), the ESP32-S3 behind the Heltec (LoRa), and the same box on a Pico 2 W |
 | `infra/` | `roclink-bench` | This Mac's running hub and game: configs, the `roclink` script, `setup.sh`, the VS Code workspace |
 | `infra/` | `roclink-hubhost` | The Ansible for the hub box (Debian 13): hardening, the central MQTT broker, the hub and game in rootless podman, Caddy, Beszel, backups |
 

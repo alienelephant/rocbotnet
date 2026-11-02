@@ -25,10 +25,11 @@
 #define ROCLINK_NET 0x42
 #endif
 #ifndef ROCLINK_NODE
-#define ROCLINK_NODE 0x0301  // this proxy; the backend knows the box by it
+#define ROCLINK_NODE 0x0301  // this proxy; the backend knows the box by it. One per
+                             // board, never shared (docs/BOXLINK.md 9, "Node addresses")
 #endif
 #ifndef NODE_CHAIN_KEY
-// The DEMO keys (provision.py --demo 0301 0302): anyone can derive them from
+// The DEMO keys (provision.py --demo 0301 0302 0303): anyone can derive them from
 // the published test-vector master key. Put your own in secrets.h.
 #if ROCLINK_NODE == 0x0301
 #define NODE_CHAIN_KEY {0xE0, 0x41, 0xC3, 0xD7, 0x94, 0x25, 0x3B, 0x4B, \
@@ -36,6 +37,9 @@
 #elif ROCLINK_NODE == 0x0302
 #define NODE_CHAIN_KEY {0xEB, 0xF2, 0xFE, 0x1B, 0x4A, 0x95, 0x96, 0x25, \
                         0x96, 0x45, 0xDE, 0x23, 0xC7, 0x95, 0xD8, 0x6E}
+#elif ROCLINK_NODE == 0x0303
+#define NODE_CHAIN_KEY {0xA8, 0x70, 0x36, 0x6B, 0x75, 0x89, 0xCD, 0x73, \
+                        0xF9, 0x85, 0xA1, 0xEA, 0xA5, 0x63, 0xF5, 0x42}
 #else
 #error "no demo key for this ROCLINK_NODE: put NODE_CHAIN_KEY in secrets.h (provision.py)"
 #endif
@@ -109,6 +113,11 @@
 // --- the game-box build (gamebox.cpp): the dummy fob the login button uses
 #ifndef DUMMY_FOB
 #define DUMMY_FOB {0xF0, 0xB0, (uint8_t)(ROCLINK_NODE >> 8), (uint8_t)ROCLINK_NODE}  // f0b00301
+#endif
+// 1: no button needed: it logs in with the dummy fob by itself once its link
+// is up, and again until the game says go (xiao_gamebox_auto)
+#ifndef AUTO_LOGIN
+#define AUTO_LOGIN 0
 #endif
 
 #define FW_VERSION 0x0001

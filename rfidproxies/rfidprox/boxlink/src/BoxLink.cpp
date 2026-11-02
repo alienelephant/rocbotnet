@@ -6,6 +6,7 @@ using namespace boxlink;
 
 static constexpr uint32_t ANSWER_WAIT_MS = 3000;  // the proxy forwards a frame before answering it
 static constexpr int ATTEMPTS = 2;
+static constexpr uint32_t KEEPALIVE_MS = 5000;    // BOXLINK.md 8: something at least this often
 
 int BoxLink::begin(const char *box_type, uint16_t box_version) {
     // A random first seq: after a restart, the box's frames mustn't look like
@@ -26,7 +27,16 @@ void BoxLink::poll() {
     Frame f;
     while (port_.available())
         if (decoder_.feed((uint8_t)port_.read(), &f)) handle(f);
+    // A PING without ACK_REQ when the box has been quiet: the proxy answers
+    // with its STATUS, which puts the session and link right if a frame from
+    // the proxy was lost. Nothing waits for it.
+    if (!waiting_ && millis() - last_tx_ms_ >= KEEPALIVE_MS) {
+        Frame ping = {CTRL, 0, ++seq_, OP_PING, 0, {}};
+        transmit(ping);
+    }
 }
+
+int BoxLink::ping() { return request(CTRL, OP_PING, nullptr, 0); }
 
 int BoxLink::send(uint8_t schema, Payload p) {
     if (schema < FIRST_BOX_SCHEMA) return REFUSED_BAD_SCHEMA;
@@ -41,8 +51,11 @@ int BoxLink::trigger(uint8_t what, uint8_t arg) {
 
 // Stop-and-wait: one frame at a time, the same bytes again if no answer.
 int BoxLink::request(uint8_t type, uint8_t schema, const void *data, size_t length) {
+    // A handler called while another request waits: sending now would take
+    // over the wait, and the first request would miss its answer.
+    if (waiting_) return REFUSED_BUSY;
     Frame f = {type, FLAG_ACK_REQ, ++seq_, schema, (uint8_t)length, {}};
-    memcpy(f.payload, data, length);
+    if (length) memcpy(f.payload, data, length);
     waiting_ = true;
     waiting_seq_ = f.seq;
     answer_ = NO_ANSWER;
@@ -55,6 +68,9 @@ int BoxLink::request(uint8_t type, uint8_t schema, const void *data, size_t leng
         }
     }
     waiting_ = false;
+    // The proxy has no session: if the box thought it had one, the frame that
+    // closed it was lost.
+    if (answer_ == REFUSED_NO_SESSION) set_session(0);
     return answer_;
 }
 
@@ -63,6 +79,14 @@ void BoxLink::transmit(const Frame &f) {
     size_t n = encode(f, wire);
     port_.write((uint8_t)0x00);  // a delimiter first: the proxy drops any half-read frame
     port_.write(wire, n);
+    last_tx_ms_ = millis();
+}
+
+void BoxLink::set_session(uint16_t session) {
+    if (session == session_) return;
+    bool was_open = session_ != 0;
+    session_ = session;
+    if (on_session_ && (session_ != 0 || was_open)) on_session_(session_ != 0);
 }
 
 void BoxLink::handle(const Frame &f) {
@@ -83,28 +107,16 @@ void BoxLink::handle(const Frame &f) {
         case OP_HELLO_ACK:  // ver, proxy_version u16, max_payload, link, session u16
             if (f.length < 7) return;
             link_ = p[4];
-            if ((p[5] | p[6] << 8) != session_) {
-                session_ = (uint16_t)(p[5] | p[6] << 8);
-                if (on_session_) on_session_(session_ != 0);
-            }
-            return;
+            return set_session((uint16_t)(p[5] | p[6] << 8));
         case OP_STATUS:  // link, session u16, budget
             if (f.length < 3) return;
             link_ = p[0];
-            if ((p[1] | p[2] << 8) != session_) {
-                session_ = (uint16_t)(p[1] | p[2] << 8);
-                if (on_session_) on_session_(session_ != 0);
-            }
-            return;
+            return set_session((uint16_t)(p[1] | p[2] << 8));
         case OP_SESSION_OPEN:  // session u16, lifetime_s u16, label
             if (f.length < 2) return;
-            session_ = (uint16_t)(p[0] | p[1] << 8);
-            if (on_session_) on_session_(true);
-            return;
+            return set_session((uint16_t)(p[0] | p[1] << 8));
         case OP_SESSION_CLOSED:  // session u16, reason
-            session_ = 0;
-            if (on_session_) on_session_(false);
-            return;
+            return set_session(0);
         case OP_VERDICT:  // result, arg u16, solved, required
             if (f.length < 5) return;
             if (on_verdict_) on_verdict_(Verdict{p[0], (uint16_t)(p[1] | p[2] << 8), p[3], p[4]});

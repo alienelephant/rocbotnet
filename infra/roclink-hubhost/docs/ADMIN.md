@@ -15,7 +15,7 @@ Every service is a rootless podman container of the `roclink` user, run by rocli
 | `mosquitto` | `:8883` (TLS), `127.0.0.1:1883` (plain) | the LAN over TLS only; every client logs in, the ACL decides the topics |
 | `roclink-hub` | `127.0.0.1:8080` (API), `:8081` (public API) | through Caddy |
 | `scavhunt` | `127.0.0.1:8090` (scoreboard) | through Caddy |
-| `caddy` | `:80`, `:443`, `:8443` | the LAN |
+| `caddy` | `:80`, `:8443`, `:9443` | the LAN |
 | `beszel` | `127.0.0.1:8091` | through Caddy |
 | `beszel-agent` | `127.0.0.1:45876` | the Beszel hub |
 | sshd, chrony | `:22`, `:123/udp` | the LAN |
@@ -26,8 +26,8 @@ The firewall (nftables, table `inet roclink`) drops everything else, and anythin
 |---|---|---|
 | `http://192.168.8.134/` | the scoreboard | nothing |
 | `http://192.168.8.134/public/api/...` | the public test net's API | nothing |
-| `https://192.168.8.134/` | Beszel | a client certificate, then Beszel's login |
-| `https://192.168.8.134:8443/api/health` | the hub's read-only API (`/api/nodes`, `/api/uplinks`, ...) | a client certificate |
+| `https://192.168.8.134:8443/` | Beszel | a client certificate, then Beszel's login |
+| `https://192.168.8.134:9443/api/health` | the hub's read-only API (`/api/nodes`, `/api/uplinks`, ...) | a client certificate |
 
 ## Where things are on the box
 
@@ -79,7 +79,7 @@ reboot-required                 # says why, if the box should be rebooted
 
 - **Users.** `rocadmin` is the only admin: key login, sudo without a password, and a password (in the vault) that works only at the console. `rocuser`, the installer's user, stays as a normal user: it may log in over SSH if it's given a key, and can't sudo. root can't log in over SSH.
 - **SSH.** Keys only, members of `ssh-users` only, from the LAN only. `ssh -L` port forwarding works, to reach the services on `127.0.0.1`; nothing else is forwarded. fail2ban bans an address for an hour after 5 failures in 10 minutes, longer each time.
-- **Rootless.** A container that's broken into is the `roclink` user, which has no sudo and owns only `/srv/roclink`. The containers also run read-only, with no capabilities (Caddy keeps `NET_BIND_SERVICE`, which its binary needs to start). The cost: ports below 1024 can be bound by any user (`net.ipv4.ip_unprivileged_port_start = 80`), so Caddy can bind `:80` and `:443`.
+- **Rootless.** A container that's broken into is the `roclink` user, which has no sudo and owns only `/srv/roclink`. The containers also run read-only, with no capabilities (Caddy keeps `NET_BIND_SERVICE`, which its binary needs to start). The cost: ports below 1024 can be bound by any user (`net.ipv4.ip_unprivileged_port_start = 80`), so Caddy can bind `:80` (and `:443`, which is kept free for the game).
 - **MQTT over TLS on the LAN.** Gateways send the payloads they decrypted, and their password lets anyone forge a node's uplink, so neither crosses the LAN in clear. The broker uses the hub's certificate from the admin CA. Gateways check it against `hub-ca.crt`, which is committed, and which the gateway playbook copies to them.
 - **The admin CA can only sign for the hub.** Its name constraints allow `192.168.8.0/24` and `roclink-hub` only, so trusting it in a browser can't let its key impersonate any other site.
 - **Plain HTTP for the public pages.** The scoreboard is read-only and on the LAN. The admin pages need HTTPS, because a client certificate only works over TLS: the browser shows the admin CA's certificate, which you trust once (admin-certs.md).

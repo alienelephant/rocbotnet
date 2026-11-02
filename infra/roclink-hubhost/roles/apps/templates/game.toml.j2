@@ -1,7 +1,7 @@
 # {{ ansible_managed }}
 # The game on the hub host: the bench game (infra/roclink-bench/etc/game.toml),
-# the real boxes only, the Heltec's (LoRa) and the XIAO's (Wi-Fi). Paths are
-# inside the container: /var/lib/scavhunt is {{ roclink_root }}/data/scavhunt.
+# the real boxes only: the Heltec's (LoRa), the XIAO's (Wi-Fi) and the Pico 2 W's.
+# Paths are inside the container: /var/lib/scavhunt is {{ roclink_root }}/data/scavhunt.
 [game]
 id = "bench-hunt"
 title = "Bench Hunt"
@@ -23,6 +23,15 @@ id = "workshop"
 name = "Workshop (XIAO)"
 net = 0x42
 node = 0x0302
+
+# The Pico 2 W box behind the XIAO that logs in by itself (roclink-scavbox-picow,
+# rfidprox xiao_gamebox_auto). Optional: worth points, not needed to finish.
+[[box]]
+id = "lab"
+name = "Lab (Pico 2 W)"
+net = 0x42
+node = 0x0303
+required = false
 
 [service]
 name = "scavhunt"

@@ -6,7 +6,7 @@ Ansible for the hub: a Debian 13 box on the LAN (`192.168.8.134`) that runs the 
  gateways (Pi) ──MQTT/TLS :8883─►  mosquitto ──► roclink-hub ──► scavhunt
                                                  │                │
  browsers ──HTTP :80──────────►  caddy ──────────┴── /public/     └── / (scoreboard)
- admins ──HTTPS :443, :8443 ──►  caddy (client certificate) ──► beszel, the hub's API
+ admins ──HTTPS :8443, :9443 ─►  caddy (client certificate) ──► beszel, the hub's API
  gateways' beszel agents ◄──SSH :45876── beszel
 ```
 

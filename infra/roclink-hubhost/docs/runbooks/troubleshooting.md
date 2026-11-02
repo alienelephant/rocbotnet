@@ -38,7 +38,8 @@ roclink logs <service>  # why
 |---|---|
 | connection refused on `:80` | Caddy is down: `roclink logs caddy` |
 | `502 Bad Gateway` | Caddy's up, the service behind it isn't: `roclink status` |
-| the browser shows a connection or "bad certificate" error on `https://` | no client certificate installed, or not chosen, or not in `admin_clients` ([admin-certs.md](admin-certs.md)) |
+| connection refused on `https://192.168.8.134/` (no port) | nothing listens on 443: Beszel is at `:8443`, the hub's API at `:9443` |
+| the browser shows a connection or "bad certificate" error on `:8443` or `:9443` | no client certificate installed, or not chosen, or not in `admin_clients` ([admin-certs.md](admin-certs.md)). Chrome and Edge remember the certificate you chose, or that you chose none, until they restart: quit the browser completely and open the page again |
 | "not secure" / "unknown issuer" on `https://` | the admin CA isn't trusted in that browser |
 | works from the hub (`curl http://127.0.0.1:8090/`), not from elsewhere | the firewall, or the client's not on `192.168.8.0/24` |
 

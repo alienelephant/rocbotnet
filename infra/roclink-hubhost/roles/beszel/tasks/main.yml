@@ -89,6 +89,6 @@
 - name: Next
   ansible.builtin.debug:
     msg: >-
-      Beszel is at https://{{ ansible_host }}/ (with your client certificate).
+      Beszel is at https://{{ ansible_host }}:{{ beszel_https_port }}/ (with your client certificate).
       First time: create the admin account there, then add this host as a system:
       host 127.0.0.1, port {{ beszel_agent_port }} (docs/runbooks/beszel.md).

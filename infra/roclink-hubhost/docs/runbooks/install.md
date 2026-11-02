@@ -41,7 +41,7 @@ To run it in stages, use the tags in order: `--tags base`, `harden`, `podman`, `
 ## 3. By hand, once
 
 1. Install your client certificate and trust the admin CA in your browser ([admin-certs.md](admin-certs.md)).
-2. Open `https://192.168.8.134/`, make Beszel's admin account, and add this host and the gateways ([beszel.md](beszel.md)).
+2. Open `https://192.168.8.134:8443/`, make Beszel's admin account, and add this host and the gateways ([beszel.md](beszel.md)).
 3. If the gateways still use the Pi's broker: [gateway-cutover.md](gateway-cutover.md).
 4. Check: `ssh rocuser@192.168.8.134` with a password is refused, `http://192.168.8.134/` shows the scoreboard, and `roclink status` shows six services running.
 

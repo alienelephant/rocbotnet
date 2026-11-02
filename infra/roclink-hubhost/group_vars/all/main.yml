@@ -30,8 +30,9 @@ src_ref: HEAD
 mqtt_port: 1883              # plain, on 127.0.0.1: the hub, the game, roclink watch
 mqtts_port: 8883             # TLS, for the LAN: the gateways (server certificate from roles/pki)
 http_port: 80                # public: the scoreboard, and the public net's API under /public/
-beszel_https_port: 443       # admin, client certificate: Beszel
-hubapi_https_port: 8443      # admin, client certificate: the hub's read-only API
+                             # (443 stays closed: kept for the game)
+beszel_https_port: 8443      # admin, client certificate: Beszel
+hubapi_https_port: 9443      # admin, client certificate: the hub's read-only API
 hub_api_port: 8080
 public_api_port: 8081
 scoreboard_port: 8090

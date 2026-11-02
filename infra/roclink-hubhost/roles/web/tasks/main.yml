@@ -1,8 +1,9 @@
 # Caddy: the one way in over HTTP.
 #   http://<hub>/            the scoreboard (public)
 #   http://<hub>/public/     the public test net's API (public)
-#   https://<hub>/           Beszel                         } a client certificate
-#   https://<hub>:8443/      the hub's read-only API        } from the admin CA
+#   https://<hub>:8443/      Beszel                         } a client certificate
+#   https://<hub>:9443/      the hub's read-only API        } from the admin CA
+# Nothing on 443: it's kept for the game.
 - name: Directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -102,7 +103,9 @@
   become: false
   register: nocert
   changed_when: false
-  failed_when: nocert.rc == 0
+  # Turned away in the TLS handshake (35, or 56 with TLS 1.3's late alert), not
+  # just failing: a port the firewall drops fails too.
+  failed_when: nocert.rc not in [35, 56]
 
 - name: The admin pages let an admin in
   ansible.builtin.command: >-
