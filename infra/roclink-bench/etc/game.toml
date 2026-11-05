@@ -9,6 +9,11 @@ session_timeout_min = 10
 points = 100
 hint_penalty_s = [60, 120, 300]
 wrong_penalty_s = 30
+# Any fob plays, for now (no backend database of fobs yet): an unknown fob's
+# first START enters a team for it, shown as "Fob" and its first three hex
+# digits (roclink-scavhunt README, "Any fob plays").
+open_teams = true
+open_team_name = "Fob {first3}"
 
 [[box]]
 id = "tower"

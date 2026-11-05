@@ -318,3 +318,85 @@ def test_box_data_from_the_hub(env):
     assert data == {"vault": {**latest, "recent": [latest]}}
     assert asked[0] == "http://hub:8080/api/uplinks?net=66&node=513&min_schema=32&limit=10"
     assert len(asked) == len(game.boxes)
+
+
+# ------------------------------------------------------- open teams (any fob)
+
+FOB_A = bytes.fromhex("0F00A1B2C3")
+FOB_B = bytes.fromhex("0F00D4E5F6")  # same first three digits as FOB_A
+
+
+@pytest.fixture
+def open_env(tmp_path):
+    raw = {**GAME, "game": {**GAME["game"], "open_teams": True}}
+    game = parse_game(raw)
+    store = Store(str(tmp_path / "game.db"))
+    run = store.create_run(game, "r1", 0)
+    with store.change(run) as append:
+        append({"kind": "team_entered", "at": 0, "team": "red", "name": "Red", "tokens": [RED.hex()]})
+        append({"kind": "run_started", "at": T0})
+    return game, store, Service(game, store, ServiceConfig()), tmp_path
+
+
+def test_open_teams_any_fob_plays(open_env):
+    game, store, svc, _ = open_env
+    _, v = verdict_of(svc.uplink(record(0x201, FOB_A, T0 + 1, schema=m.SCHEMA_START)))
+    assert v[0] == Verdict.GO
+    team = svc.run.teams[svc.run.tokens[FOB_A]]
+    assert team.name == "Fob 0F0"
+    _, v = verdict_of(svc.uplink(record(0x201, FOB_A, T0 + S)))
+    assert v[0] == Verdict.ACCEPTED and "vault" in team.solved
+    kinds = [e["kind"] for e in store.events("r1")]
+    assert kinds[-3:] == ["team_entered", "start", "claim"]
+
+
+def test_open_teams_same_fob_is_the_same_team(open_env):
+    _, _, svc, _ = open_env
+    play(svc, 0x201, FOB_A, T0)
+    play(svc, 0x203, FOB_A, T0 + MIN)
+    assert len(svc.run.teams) == 2  # Red, and the one fob
+
+
+def test_open_teams_names_are_numbered_ids_hide_the_token(open_env):
+    _, store, svc, _ = open_env
+    play(svc, 0x201, FOB_A, T0)
+    play(svc, 0x203, FOB_B, T0 + MIN)
+    a, b = (svc.run.teams[svc.run.tokens[f]] for f in (FOB_A, FOB_B))
+    assert (a.name, b.name) == ("Fob 0F0", "Fob 0F0 #2")
+    for t in (a, b):
+        assert t.id.startswith("fob-") and FOB_A.hex() not in t.id and FOB_B.hex() not in t.id
+    # the scoreboard's view of the log has no tokens, the open teams' included
+    assert all("tokens" not in e and "token" not in e for e in api.events(store, "r1"))
+
+
+def test_open_teams_rebuild_after_restart(open_env):
+    game, _, svc, tmp_path = open_env
+    play(svc, 0x201, FOB_A, T0)
+    again = Service(game, Store(str(tmp_path / "game.db")), ServiceConfig())
+    tid = again.run.tokens[FOB_A]
+    assert again.run.teams[tid].name == "Fob 0F0" and "vault" in again.run.teams[tid].solved
+
+
+def test_open_teams_only_while_running_and_only_on_start(open_env):
+    game, store, svc, _ = open_env
+    _, v = verdict_of(svc.uplink(record(0x201, FOB_A, T0 + 1)))  # a WIN from a stranger
+    assert v[0] == Verdict.UNKNOWN_TEAM and FOB_A not in svc.run.tokens
+    with store.change(svc.run) as append:
+        append({"kind": "run_ended", "at": T0 + 2})
+    _, v = verdict_of(svc.uplink(record(0x201, FOB_A, T0 + 3, schema=m.SCHEMA_START)))
+    assert v[0] == Verdict.NOT_RUNNING and FOB_A not in svc.run.tokens
+
+
+def test_open_teams_off_by_default(env):
+    _, _, svc, _ = env
+    _, v = verdict_of(svc.uplink(record(0x201, FOB_A, T0 + 1, schema=m.SCHEMA_START)))
+    assert v[0] == Verdict.UNKNOWN_TEAM
+
+
+def test_open_team_name_template():
+    from scavhunt.game import open_team_label
+    assert open_team_label("Fob {first3}", FOB_A) == "Fob 0F0"
+    assert open_team_label("{last3}", FOB_A) == "2C3"
+    assert open_team_label("#{number}", FOB_A) == "#10597059"
+    with pytest.raises(GameError, match="open_team_name"):
+        parse_game({**GAME, "game": {**GAME["game"], "open_team_name": "Fob {fist3}"}})

@@ -187,6 +187,8 @@ flowchart LR
 
 At the start, *Vault*, *Garden* and *Cellar* are open. A start at *Tower* before *Lab* and *Garden* are solved is answered `locked`.
 
+**Any fob plays** (`open_teams`). Before there's registration, the game can enter teams itself: a `START` from a token no team holds first records a `team_entered` event for it (name from `open_team_name`, id from a hash of the token), then is judged like any other. Only a `START`, and only while the run is on, enters a team; replaying the log rebuilds them like any other team.
+
 ## 6. Messages
 
 Boxes are one roclink device type, `scavhunt-box`, so these message schemas belong to it alone (roclink PROTOCOL.md §5). All integers are little-endian. Every uplink is sent with `ACK_REQ`.

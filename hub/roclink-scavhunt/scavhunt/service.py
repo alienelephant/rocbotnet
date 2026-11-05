@@ -13,6 +13,7 @@ picks them up, so it never needs restarting during a game.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import ssl
@@ -21,7 +22,7 @@ import time
 from dataclasses import dataclass
 
 from . import messages as msg
-from .game import Game, GameError, Reply, Run, Verdict
+from .game import Game, GameError, Reply, Run, Verdict, open_team_label
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -134,6 +135,8 @@ class Service:
                          "" if team else " (no session, not counted)")
                 return []
             if schema == msg.SCHEMA_START:
+                if self.game.open_teams and token not in run.tokens and run.running_at(at):
+                    append(self._open_team(run, token, at))
                 r = run.judge_start(token, box, at)
                 ev["kind"] = "start"
             elif schema == msg.SCHEMA_HINT:
@@ -147,6 +150,24 @@ class Service:
         log.info("box %s, team %s: %s %s, %s (%d of %d)", box.id, r.team or "?", ev["kind"],
                  r.verdict.name.lower(), r.arg, r.solved_required, r.required_total)
         return self._verdict_down(box, r, eid)
+
+    def _open_team(self, run: Run, token: bytes, at: int) -> dict:
+        """open_teams: the event that enters a team for a fob no team holds.
+        Its id comes from a hash of the token, never the token: ids are on the
+        scoreboard and the API, and a token is what lets a fob play as a team.
+        Its name is the game's open_team_name, numbered if another team has it."""
+        digest = hashlib.sha256(token).hexdigest()
+        n = 8
+        while f"fob-{digest[:n]}" in run.teams:  # a hash prefix collision: longer
+            n += 2
+        name = base = open_team_label(self.game.open_team_name, token)
+        names = {t.name for t in run.teams.values()}
+        i = 2
+        while name in names:
+            name, i = f"{base} #{i}", i + 1
+        log.info("open_teams: a new fob joins as %s", name)
+        return {"kind": "team_entered", "at": at, "team": f"fob-{digest[:n]}", "name": name,
+                "tokens": [token.hex()], "open": True}
 
     def _verdict_down(self, box, r: Reply, eid) -> list[tuple[str, bytes]]:
         arg = self.game.boxes[r.needs].node if r.needs else r.arg

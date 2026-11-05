@@ -43,6 +43,11 @@ class Game:
     boxes: dict[str, Box]  # in declaration order
     time_limit_s: int | None = None
     session_timeout_s: int = 20 * 60
+    # Any fob plays (docs/GAME.md §5): a START from a token no team holds
+    # enters a team for it first, named from open_team_name. For running a
+    # game before there's a registration desk or a backend database.
+    open_teams: bool = False
+    open_team_name: str = "Fob {first3}"
 
     @property
     def required(self) -> list[str]:
@@ -106,11 +111,29 @@ def parse_game(raw: dict) -> Game:
     timeout = g.get("session_timeout_min", 20)
     if not timeout or timeout <= 0:
         raise GameError("session_timeout_min must be positive")
+    open_teams = g.get("open_teams", False)
+    if not isinstance(open_teams, bool):
+        raise GameError("open_teams must be true or false")
+    open_name = g.get("open_team_name", "Fob {first3}")
+    try:
+        open_team_label(open_name, bytes(5))
+    except (KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
+        raise GameError(f"open_team_name {open_name!r}: {e!r} (use {{first3}}, {{last3}}, {{hex}}, {{number}})") from None
     game = Game(g["id"], g.get("title", g["id"]), boxes,
-                int(limit * 60) if limit else None, int(timeout * 60))
+                int(limit * 60) if limit else None, int(timeout * 60), open_teams, open_name)
     if not game.required:
         raise GameError("at least one box must be required")
     return game
+
+
+def open_team_label(template: str, token: bytes) -> str:
+    """A team's name from its fob, for open_teams. The placeholders:
+    {first3} and {last3}, the first and last three hex digits of the token
+    ("0F0", "2C3" for 0F00A1B2C3); {hex}, all of it; {number}, its low 32 bits
+    in decimal, the number EM4100 fobs usually have printed on them."""
+    h = token.hex().upper()
+    return template.format(first3=h[:3], last3=h[-3:], hex=h,
+                           number=int.from_bytes(token[-4:], "big"))
 
 
 def _check_acyclic(boxes: dict[str, Box]) -> None:

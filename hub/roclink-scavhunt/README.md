@@ -44,6 +44,8 @@ scavhunt end                           # or the time limit, or every team finish
 
 Operator commands write to the same event log, and the running service picks them up within a second, so you never restart it during a game.
 
+**Any fob plays.** With `open_teams = true` in `[game]` there's no need to enter teams: the first time an unknown fob starts a box, the game enters a team for it and plays it, named from `open_team_name` (default `"Fob {first3}"`, the token's first three hex digits; `{last3}`, `{hex}` and `{number}` work too, and duplicate names are numbered). The team's id is derived from a hash of the token, so the scoreboard and the API never show the token itself. Teams entered with `scavhunt team` still work alongside. The run still has to be started (`scavhunt start`), and a stranger's WIN or HINT without a START is still `unknown team`.
+
 ## The hub's side
 
 In the hub's config, register the boxes as one device type, always-listening so that verdicts are sent at once, and route them to this service:

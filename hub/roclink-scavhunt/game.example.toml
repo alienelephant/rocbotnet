@@ -6,6 +6,13 @@ id = "makerspace-hunt"
 title = "The Makerspace Hunt"
 time_limit_min = 90          # omit for no time limit
 session_timeout_min = 20     # a team that goes quiet at a box is charged this much
+# Any fob plays: a START from a token no team holds enters a team for it, named
+# from open_team_name ({first3}, {last3}: the first/last three hex digits of
+# the token; {hex}: all of it; {number}: its low 32 bits in decimal, often
+# printed on EM4100 fobs). Duplicate names are numbered ("Fob 0F0 #2").
+# For playing without registering teams first; off by default.
+# open_teams = true
+# open_team_name = "Fob {first3}"
 
 # Scoring (docs/GAME.md §3). These are defaults; any [[box]] can set its own.
 points = 100                 # each box solved
