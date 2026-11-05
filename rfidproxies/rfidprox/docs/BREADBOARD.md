@@ -223,17 +223,13 @@ The reader's TX idles high, so GPIO4 sits at 3.3 V; a weak pull-down makes it re
 [rdm6300] last 5s: 588 bytes, 42 tag frames, 0 bad frames | link: ready
 ```
 
-A frame is `0x02`, ten hex digits (the tag's 5 bytes), two hex digits (their XOR), `0x03`; the module repeats it for as long as the tag stays in the field. One that fails its checksum or doesn't end in `0x03` is shown:
-
-```
-[rdm6300] bad frame: 0F00A1B2C300 (end byte 0x03)
-```
+A frame is `0x02`, ten hex digits (the tag's 5 bytes), two hex digits (their XOR), `0x03`; the module repeats it for as long as the tag stays in the field. One that is the wrong length, has a non-hex digit or fails its checksum counts as a bad frame and is dropped. The parsing is in `firmware/lib/RDM6300Parser`.
 
 | What you see | Means | Do |
 |---|---|---|
 | `TX line LOW` | Nothing drives GPIO4: the reader is unpowered, or its TX isn't wired to the divider | Measure 5 V between the module's +5V and GND. Check which P1 pin is TX on your module's silkscreen, and that it goes through the 10 kΩ to the junction row. |
 | `no bytes` with `TX line HIGH` while you hold a tag on the coil | The reader is powered and wired, but reads nothing | Measure 5 V between the module's +5V and GND. Check TX goes to J3-15 through the 10 kΩ resistor (not RX: the pin names are close). Check the coil is plugged into P2. Check it's a 125 kHz tag: 13.56 MHz cards never answer. If the module's LED (P3) lights with a tag, the reader works and the fault is the TX wire or the divider. |
-| `bytes` but every frame `bad`, often with garbage digits | The bytes arrive garbled | The divider's GND is missing, or it's wired the wrong way round (TX straight to GPIO4, 20 kΩ in the wrong place): the pin should read 3.3 V idle. |
+| `bytes` but every frame `bad` | The bytes arrive garbled | The divider's GND is missing, or it's wired the wrong way round (TX straight to GPIO4, 20 kΩ in the wrong place): the pin should read 3.3 V idle. |
 | Some `bad frames` among good ones | Noise, usually a tag at the edge of the field | Hold the tag flat and still on the coil. Harmless: bad frames are dropped and the next good one counts. |
 | Tag frames, but no `tag` line | The tag counted once already | A tag counts once while held, and again after it's been away for 2 s (`SAME_CARD_MS`). |
 | `link: joining Wi-Fi` or `waiting for HELLO ACK` | The reader still runs; tags show as "Offline" on the display, and aren't sent | Fix the link separately (§5) |

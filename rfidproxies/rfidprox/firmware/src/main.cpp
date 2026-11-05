@@ -11,20 +11,23 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <RDM6300Wrapper.h>
 
 #include "config.h"
 #include "rlink.h"
 #include "messages.h"
 
 // --- hardware
-static HardwareSerial &reader = Serial2;  // UART2: UART1 is the box's (gamebox.cpp)
+static HardwareSerial &reader_uart = Serial2;  // UART2: UART1 is the box's (gamebox.cpp)
+// A held tag counts once, until it has been away for SAME_CARD_MS.
+static RDM6300Wrapper reader(reader_uart, SAME_CARD_MS);
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, PIN_OLED_RST, PIN_OLED_SCL, PIN_OLED_SDA);
 
 // --- state
 enum class State { joining, hello, idle, authorizing };
 static State state = State::joining;
-static uint32_t last_ping_ms, auth_sent_ms, last_card_ms;
-static uint8_t last_tag[5], req_id;
+static uint32_t last_ping_ms, auth_sent_ms;
+static uint8_t req_id;
 static char headline[22] = "Starting";
 static char detail[22] = "";
 
@@ -91,38 +94,10 @@ static void on_downlink(uint8_t schema, const uint8_t *p, size_t len) {
 
 // -------------------------------------------------------------------- reader
 
-// The RDM6300 reads 125 kHz EM4100 tags and sends each one it sees as a frame
-// on its TX line, 9600 8N1, again and again while the tag stays in the field:
-//   0x02 | 10 hex digits: the tag's 5 bytes | 2 hex digits: their XOR | 0x03
-// It sends nothing without a tag, so there's no way to ask whether it's there.
-
-// Diagnostics (RDM6300_DEBUG in config.h): what arrived on the reader's UART,
-// summarised every RDM6300_REPORT_MS.
-static uint32_t dbg_bytes, dbg_frames, dbg_bad, dbg_last_report;
-
-static int hex_digit(uint8_t c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    return -1;
-}
-
-// Checks a frame's 12 digits (between 0x02 and 0x03) and decodes the tag.
-static bool decode_frame(const uint8_t *digits, uint8_t *tag) {
-    uint8_t sum = 0;
-    for (int i = 0; i < 6; ++i) {
-        int hi = hex_digit(digits[2 * i]), lo = hex_digit(digits[2 * i + 1]);
-        if (hi < 0 || lo < 0) return false;
-        uint8_t b = (uint8_t)(hi << 4 | lo);
-        if (i < 5) {
-            tag[i] = b;
-            sum ^= b;
-        } else if (b != sum) {
-            return false;
-        }
-    }
-    return true;
-}
+// The RDM6300 reads 125 kHz EM4100 tags and repeats each one as a frame on its
+// TX line (9600 8N1) while the tag stays in the field. It sends nothing without
+// a tag, so there's no way to ask whether it's there. RDM6300Wrapper (lib/)
+// parses and checks the frames; this file only sets up the UART and reports.
 
 // The reader's TX idles high, so through the divider GPIO4 should sit at 3.3 V.
 // A weak pull-down makes a line that isn't driven read low instead of floating.
@@ -136,77 +111,42 @@ static const char *line_verdict(bool high) {
 
 static void reader_begin() {
     Serial.printf("[rdm6300] TX to GPIO%d (through the 5 V to 3.3 V divider), %d baud\n", PIN_RDM6300_RX,
-                  RDM6300_BAUD);
-    reader.begin(RDM6300_BAUD, SERIAL_8N1, PIN_RDM6300_RX, -1);
+                  (int)RDM6300Wrapper::BAUD);
+    reader_uart.begin(RDM6300Wrapper::BAUD, SERIAL_8N1, PIN_RDM6300_RX, -1);
     gpio_pullup_dis((gpio_num_t)PIN_RDM6300_RX);  // the UART driver may have enabled one
     gpio_pulldown_en((gpio_num_t)PIN_RDM6300_RX);
     delay(5);
     Serial.printf("[rdm6300] TX line %s\n", line_verdict(reader_line_high()));
 }
 
-// Reads what's waiting on the UART. Returns true with a tag's 5 bytes once a
-// whole frame with a good checksum has arrived.
-static bool read_card(uint8_t *tag) {
-    static uint8_t frame[12];
-    static int pos = -1;  // -1: waiting for 0x02
-    while (reader.available()) {
-        uint8_t c = (uint8_t)reader.read();
-        dbg_bytes++;
-        if (c == 0x02) {  // a frame starts, even in the middle of a broken one
-            pos = 0;
-        } else if (pos < 0) {
-            continue;  // between frames: some modules add CR LF
-        } else if (pos < (int)sizeof(frame)) {
-            frame[pos++] = c;
-        } else {
-            bool ok = c == 0x03 && decode_frame(frame, tag);
-            pos = -1;
-            if (ok) {
-                dbg_frames++;
-                return true;
-            }
-            dbg_bad++;
-#if RDM6300_DEBUG
-            Serial.printf("[rdm6300] bad frame: %.12s (end byte 0x%02X)\n", (const char *)frame, c);
-#endif
-        }
-    }
-    return false;
-}
-
 // Every RDM6300_REPORT_MS: what the reader sent or, with nothing, the TX line's level.
 static void reader_report() {
 #if RDM6300_DEBUG
-    if (millis() - dbg_last_report < RDM6300_REPORT_MS) return;
-    dbg_last_report = millis();
-    if (!dbg_bytes) {
+    static uint32_t last_ms, last_bytes, last_frames, last_bad;
+    if (millis() - last_ms < RDM6300_REPORT_MS) return;
+    last_ms = millis();
+    uint32_t bytes = reader.bytes() - last_bytes, frames = reader.frames() - last_frames,
+             bad = reader.badFrames() - last_bad;
+    last_bytes = reader.bytes();
+    last_frames = reader.frames();
+    last_bad = reader.badFrames();
+    if (!bytes) {
         Serial.printf("[rdm6300] last %lus: no bytes (normal without a 125 kHz tag); TX line %s\n",
                       (unsigned long)(RDM6300_REPORT_MS / 1000), line_verdict(reader_line_high()));
         return;
     }
     Serial.printf("[rdm6300] last %lus: %lu bytes, %lu tag frames, %lu bad frames | link: %s\n",
-                  (unsigned long)(RDM6300_REPORT_MS / 1000), (unsigned long)dbg_bytes,
-                  (unsigned long)dbg_frames, (unsigned long)dbg_bad,
+                  (unsigned long)(RDM6300_REPORT_MS / 1000), (unsigned long)bytes, (unsigned long)frames,
+                  (unsigned long)bad,
                   state == State::joining ? "joining Wi-Fi" : state == State::hello ? "waiting for HELLO ACK"
                   : state == State::idle ? "ready" : "waiting for GRANT");
-    dbg_bytes = dbg_frames = dbg_bad = 0;
 #endif
 }
 
 static void on_card() {
-    uint8_t tag[5];
-    if (!read_card(tag)) return;
-    // The reader repeats a tag while it's held: it counts once, until it has
-    // been away for SAME_CARD_MS.
-    bool same = !memcmp(tag, last_tag, sizeof(tag)) && millis() - last_card_ms < SAME_CARD_MS;
-    last_card_ms = millis();
-    if (same) return;
-    memcpy(last_tag, tag, sizeof(tag));
-
-    char hex[11];
-    for (uint8_t i = 0; i < sizeof(tag); ++i) snprintf(hex + 2 * i, 3, "%02X", tag[i]);
-    Serial.printf("[rdm6300] tag %s (EM4100: id %lu)\n", hex,
-                  (unsigned long)((uint32_t)tag[1] << 24 | tag[2] << 16 | tag[3] << 8 | tag[4]));
+    if (!reader.read()) return;  // true once per tag presentation
+    const char *hex = reader.lastCardHex();
+    Serial.printf("[rdm6300] tag %s (EM4100: id %lu)\n", hex, (unsigned long)reader.lastCardNumber());
     beep(2000, 60);
 
     if (state == State::authorizing) return;  // one request at a time
@@ -214,7 +154,8 @@ static void on_card() {
         show("Offline", hex);
         return;
     }
-    uint8_t payload[24];
+    uint8_t tag[5], payload[24];
+    reader.lastCardBytes(tag);
     // A 125 kHz tag has no ATQA or SAK (ISO 14443A's): both 0 (BACKEND.md section 1).
     size_t n = msg::auth_req(payload, ++req_id, 0, 0, tag, sizeof(tag));
     show("Checking...", hex);

@@ -54,10 +54,8 @@
 #define SAME_CARD_MS 2000                  // a tag held on the reader counts once, until away this long
 #define EPOCH_MS (24UL * 60UL * 60UL * 1000UL)  // roclink key ratchet: daily
 
-// --- RDM6300 (125 kHz EM4100 reader, a UART). Diagnostics on the serial log:
-// every bad frame, and a summary every RDM6300_REPORT_MS while anything
-// arrives (docs/BREADBOARD.md 6).
-#define RDM6300_BAUD 9600
+// --- RDM6300 (125 kHz EM4100 reader, a UART; lib/RDM6300Wrapper). Diagnostics
+// on the serial log: a summary every RDM6300_REPORT_MS (docs/BREADBOARD.md 6).
 #ifndef RDM6300_DEBUG
 #define RDM6300_DEBUG 1
 #endif
