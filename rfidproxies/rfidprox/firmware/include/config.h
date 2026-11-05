@@ -29,7 +29,7 @@
                              // board, never shared (docs/BOXLINK.md 9, "Node addresses")
 #endif
 #ifndef NODE_CHAIN_KEY
-// The DEMO keys (provision.py --demo 0301 0302 0303): anyone can derive them from
+// The DEMO keys (provision.py --demo 0301 0302 0303 0304): anyone can derive them from
 // the published test-vector master key. Put your own in secrets.h.
 #if ROCLINK_NODE == 0x0301
 #define NODE_CHAIN_KEY {0xE0, 0x41, 0xC3, 0xD7, 0x94, 0x25, 0x3B, 0x4B, \
@@ -40,6 +40,9 @@
 #elif ROCLINK_NODE == 0x0303
 #define NODE_CHAIN_KEY {0xA8, 0x70, 0x36, 0x6B, 0x75, 0x89, 0xCD, 0x73, \
                         0xF9, 0x85, 0xA1, 0xEA, 0xA5, 0x63, 0xF5, 0x42}
+#elif ROCLINK_NODE == 0x0304
+#define NODE_CHAIN_KEY {0x27, 0xC4, 0x7C, 0x07, 0x42, 0xB8, 0x03, 0xED, \
+                        0x97, 0xAA, 0x42, 0x30, 0xA1, 0x0E, 0xBC, 0xCE}
 #else
 #error "no demo key for this ROCLINK_NODE: put NODE_CHAIN_KEY in secrets.h (provision.py)"
 #endif
@@ -71,6 +74,19 @@
 #define LED_ON LOW
 #define PIN_BOX_TX 43       // D6: proxy TX -> box RX
 #define PIN_BOX_RX 44       // D7: box TX -> proxy RX
+#elif defined(RFIDPROX_BOARD_PICO2W)
+// --- pins: Raspberry Pi Pico 2 W, the fob proxy (pico2w_fobproxy; hardware/pico2w:
+// bom.yaml, WIRING.md and a Velxio layout). GPIO numbers; the header pin is in
+// each comment. No display, button or buzzer: a fob tapped on the RDM6300 logs
+// in, and the onboard LED (the core's PIN_LED, on the Wi-Fi chip) shows the state.
+#define PIN_RDM6300_RX 5    // pin 7, UART1 RX: the RDM6300's TX through a 10k/20k divider
+#define PIN_RDM6300_TX 4    // pin 6, UART1 TX: not connected (the reader is told nothing)
+#define LED_ON HIGH
+#define PIN_BOX_TX 0        // pin 1, UART0 TX: proxy TX -> box RX (docs/BOXLINK.md)
+#define PIN_BOX_RX 1        // pin 2, UART0 RX: box TX -> proxy RX
+#ifndef LOGIN_FOB
+#define LOGIN_FOB 1         // logins come from the fob reader, not a button
+#endif
 #else
 // --- pins: Heltec WiFi LoRa 32 V3 or V4 (docs/BREADBOARD.md). GPIO numbers;
 // the header pin is in each comment. Chosen from the GPIOs Heltec recommends
@@ -116,6 +132,11 @@
 // is up, and again until the game says go (xiao_gamebox_auto)
 #ifndef AUTO_LOGIN
 #define AUTO_LOGIN 0
+#endif
+
+// 1: the game-box build logs in with a tapped fob (RDM6300) instead of a button
+#ifndef LOGIN_FOB
+#define LOGIN_FOB 0
 #endif
 
 #define FW_VERSION 0x0001

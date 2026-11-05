@@ -1,6 +1,7 @@
 # {{ ansible_managed }}
 # The game on the hub host: the bench game (infra/roclink-bench/etc/game.toml),
-# the real boxes only: the Heltec's (LoRa), the XIAO's (Wi-Fi) and the Pico 2 W's.
+# the real boxes only: the Heltec's (LoRa), the XIAO's (Wi-Fi), the Pico 2 W's,
+# and the box behind the Pico 2 W fob proxy.
 # Paths are inside the container: /var/lib/scavhunt is {{ roclink_root }}/data/scavhunt.
 [game]
 id = "bench-hunt"
@@ -31,6 +32,16 @@ id = "lab"
 name = "Lab (Pico 2 W)"
 net = 0x42
 node = 0x0303
+required = false
+
+# The box behind the Pico 2 W fob proxy (rfidprox pico2w_fobproxy): a team logs
+# in by tapping its 125 kHz fob, so enter each team's fob ID as its token
+# (roclink scavhunt team ... --token <10 hex digits>). Optional, like the Lab.
+[[box]]
+id = "gate"
+name = "Gate (Pico 2 W fob)"
+net = 0x42
+node = 0x0304
 required = false
 
 [service]

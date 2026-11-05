@@ -1,16 +1,16 @@
 #include "rlink.h"
 
 #include <Arduino.h>
-#include <Preferences.h>
 #include <roclink.h>
 #include <roclink_secure.h>
 
 #include "config.h"
+#include "nvstore.h"
 #include "transport.h"
 
 namespace rlink {
 
-static Preferences store;
+static Store store;  // nvstore.h: NVS on the ESP32, an EEPROM sector on the Pico
 static roclink_client_t node;
 static roclink_sec_t sec;
 static roclink_fcnt_t ctr;
@@ -18,6 +18,15 @@ static DownlinkHandler handler;
 static Stats st;
 static uint32_t last_epoch_ms;
 static bool acked;  // the frame we're waiting on was ACKed
+
+// A random first sequence number.
+static uint8_t random_byte() {
+#if defined(ARDUINO_ARCH_RP2040)
+    return (uint8_t)rp2040.hwrand32();
+#else
+    return (uint8_t)esp_random();
+#endif
+}
 
 static void halt(const char *what) {
     Serial.printf("[link] FATAL: %s\n", what);
@@ -163,7 +172,7 @@ bool begin(DownlinkHandler on_downlink) {
     roclink_fcnt_init(&ctr, store.getULong("fcnt", 0), 0);  // continue past the reservation
 
     roclink_client_config_t cfg = {ROCLINK_NET, ROCLINK_NODE, ROCLINK_ADDR_ANY_GATEWAY};
-    roclink_client_init(&node, &cfg, (uint8_t)esp_random());
+    roclink_client_init(&node, &cfg, random_byte());
     last_epoch_ms = millis();
 
     Serial.printf("[link] node %02X/%04X, epoch %lu%s\n", ROCLINK_NET, ROCLINK_NODE, (unsigned long)epoch,

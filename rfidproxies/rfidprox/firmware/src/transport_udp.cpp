@@ -14,11 +14,28 @@ static WiFiUDP udp;
 static bool udp_open = false;
 static IPAddress gateway(GATEWAY_IP);
 
+static uint32_t joined_at;  // millis() of the last join attempt
+
+// Starts joining and returns at once. On the Pico, WiFi.begin() would block
+// until it joins or gives up (up to 30 s), and the reader and the box port
+// would go unserved meanwhile: beginNoBlock() joins in the background.
+static void join() {
+#if defined(ARDUINO_ARCH_RP2040)
+    if (*WIFI_PASSWORD) WiFi.beginNoBlock(WIFI_SSID, WIFI_PASSWORD);
+    else WiFi.beginNoBlock(WIFI_SSID);  // an open network
+#else
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);  // the ESP32's begin() doesn't block
+#endif
+    joined_at = millis();
+}
+
 bool begin() {
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#if !defined(ARDUINO_ARCH_RP2040)
+    WiFi.setAutoReconnect(true);  // the Pico's core has no auto-reconnect: loop() rejoins
+#endif
     Serial.printf("[link] joining Wi-Fi %s\n", WIFI_SSID);
+    join();
     return true;
 }
 
@@ -34,6 +51,12 @@ void loop() {
         udp_open = false;
         Serial.println("[link] Wi-Fi down");
     }
+#if defined(ARDUINO_ARCH_RP2040)
+    if (!ready() && millis() - joined_at >= 30000) {  // not joined (or dropped): try again
+        Serial.printf("[link] still joining Wi-Fi %s: retrying\n", WIFI_SSID);
+        join();
+    }
+#endif
 }
 
 bool send(const uint8_t *frame, size_t len) {

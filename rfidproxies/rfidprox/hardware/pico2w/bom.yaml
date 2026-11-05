@@ -1,0 +1,85 @@
+project: rfidprox-pico2w
+description: >
+  rfidprox on a Raspberry Pi Pico 2 W, on a breadboard: the fob proxy
+  (firmware environment pico2w_fobproxy). An RDM6300 125 kHz reader on UART1,
+  three wires (+5V, GND, TX, its TX through a 10k/20k divider to GP5), and the
+  boxlink port to the puzzle box on UART0 (GP0/GP1, as in roclink-scavbox-picow). Velxio has no Pico 2 W: the
+  Pico W stands in (same pinout and header numbering).
+
+board:
+  kind: pi-pico-w
+  ref: U1
+  pins:
+    VBUS: 5V
+    GND.1: GND
+    GP0: BOX_TX
+    GP1: BOX_RX
+    GP5: RDM_RX
+
+power_nets: [5V, GND]
+
+parts:
+  - ref: U2
+    part: rdm6300
+    role: sensor
+    function: 125 kHz EM4100 reader, 9600 baud UART out (layout-only custom part)
+    pins: {TX: RDM_TX, RX: NC, NC: NC, GND: GND, +5V: 5V, LED: NC, +5V.2: NC, GND.2: NC, ANT1: ANT1, ANT2: ANT2}
+    notes: Runs on 5 V and its TX swings to 5 V; never wire it straight to a Pico pin. P1 order on clones varies; check the silkscreen.
+  - ref: R1
+    part: resistor
+    role: passive
+    props: {value: "10000"}
+    function: Divider top, RDM6300 TX to GP5
+    pins: {"1": RDM_TX, "2": RDM_RX}
+  - ref: R2
+    part: resistor
+    role: passive
+    props: {value: "20000"}
+    function: Divider bottom, GP5 to GND (5 V to 3.33 V)
+    pins: {"1": RDM_RX, "2": GND}
+  - ref: REF1
+    part: pinout-pico2w
+    reference: true
+    function: Pinout reference card (canvas only, not a bench part)
+    pins: {}
+
+# Breadboard layout (velxio-bom breadboard.py). The Pico and the RDM6300 sit
+# beside the breadboard: Velxio doesn't draw them at the 0.1" hole pitch.
+# Top rails: tp = 5 V, tn = GND.
+breadboard:
+  part: breadboard
+  ref: BB1
+  at: [60, 200]
+  place:
+    U1: [730, 190]
+    U2: [290, 40]
+    REF1: [60, 500]
+  seat:
+    R1.1: 51t.c        # 10k:  51t.c - 57t.c
+    R2.1: 57t.d        # 20k:  57t.d - 63t.d
+  jumpers:
+    - U1.VBUS BB1.tp.50 red
+    - U1.GND.1 BB1.tn.50 black
+    - U2.+5V BB1.tp.19 red
+    - U2.GND BB1.tn.18 black
+    - U2.TX BB1.51t.a yellow
+    - U1.GP5 BB1.57t.e green
+    - BB1.63t.a BB1.tn.49 black
+
+offcanvas:
+  - ref: L1
+    name: RDM6300 coil antenna (ships with the module)
+    function: 125 kHz field
+    pins: {"1": ANT1, "2": ANT2}
+    notes: Plugs into P2. Keep it away from the Pico's Wi-Fi antenna and from metal.
+  - ref: J2
+    name: Boxlink port (3-pin header to the puzzle box)
+    function: UART0 115200 baud to the box (docs/BOXLINK.md)
+    pins: {TX: BOX_TX, RX: BOX_RX, GND: GND}
+    notes: Cross over at the box (proxy TX to box RX). Both sides 3.3 V; don't join their 3V3/VSYS.
+
+extras:
+  - {name: EM4100 125 kHz test fobs/cards, qty: 3}
+  - {name: "Jumper wires, M-M (breadboard, Pico on headers)", qty: 4}
+  - {name: "Jumper wires, M-F (RDM6300 header to breadboard)", qty: 3}
+  - {name: USB cable for the Pico 2 W (micro-USB), qty: 1}

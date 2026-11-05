@@ -148,6 +148,8 @@ What the scavenger hunt demo runs today, before rfidauth and GAME.md 0.3. It's t
 
 **Logging in.** There's no fob reader: a button on the proxy logs in with a dummy fob (`f0b0` and the node address: `f0b00301` for `0x0301`), and holding it 1.5 s logs out. The proxy then sends `SESSION_OPEN` (label `fob f0b00301`, lifetime 0: no expiry) or `SESSION_CLOSED`. Built with `AUTO_LOGIN=1` (`xiao_gamebox_auto`), it needs no button: it logs in with the dummy fob once its link is up, tries again every 15 s until the game answers go, and again whenever the session ends with the box unsolved. Once the box is solved it stays logged out until it restarts, since logging in would only hear "already solved".
 
+**Logging in with a fob** (`pico2w_fobproxy`, built with `LOGIN_FOB=1`): no button and no dummy fob. A 125 kHz EM4100 fob tapped on the proxy's RDM6300 logs in, its 5-byte ID the team's token (`0f00a1b2c3`; enter it with `roclink scavhunt team … --token 0f00a1b2c3`), and on the game's go the proxy sends `SESSION_OPEN` with the label `fob 0f00a1b2c3`. A session ends when the box ends it (`END_SESSION`, or trigger 4, or a solve), or when **another** fob is tapped while it's open: the proxy sends the game an `END` for the first team, the box `SESSION_CLOSED` (reason `revoked`), and then logs the new fob in, so a team that walked away never locks the box. The fob already logged in, tapped again, changes nothing, nor does a tap while a login waits for its verdict. A refused login (unknown team, not running, locked, …) reaches the box as the `VERDICT`, as for the button.
+
 **Box data is forwarded unchanged,** without the session id of §6: a `DATA` frame on schema *s* becomes a roclink frame on schema *s* with exactly the box's bytes. The box decides what the bytes mean; the hub's config declares the layout (roclink-hub README, "Payload decoders"), so the proxy never needs to know. Like §6.2's gate, box data needs a session: with no one logged in it's refused `no_session` and nothing leaves the proxy. At most four `DATA` frames a second: faster ones are refused `busy`.
 
 ```c
@@ -184,16 +186,16 @@ A trigger needs a session (`no_session` otherwise), and one waiting for the game
 
 **The USB port.** For testing, the proxy accepts frames on its USB serial port too, and once one arrives, sends the box's frames there as well, between its log lines. `tools/boxsim.py /dev/ttyUSB0` uses this.
 
-**The boards.** The proxy's game-box build runs on two:
+**The boards.** The proxy's game-box build runs on three:
 
-| | Heltec V3 / V4 (`heltec_v3_gamebox`; over LoRa: `heltec_v3_gamebox_lora`) | XIAO ESP32-S3 (`xiao_gamebox`) |
-|---|---|---|
-| Radio | Wi-Fi, or LoRa (915.0 MHz, SF9) | Wi-Fi |
-| Node | `0x0301` | `0x0302` |
-| Box port: proxy TX → box RX | GPIO 40 (J3-9) | GPIO 43 (D6) |
-| Box port: box TX → proxy RX | GPIO 39 (J3-10) | GPIO 44 (D7) |
-| Login button | PRG, on the board | a push button from D0 (GPIO 1) to GND |
-| Shows the state on | the OLED | the user LED: blinking, no link; off, ready; flickering, waiting for the game; on, logged in |
+| | Heltec V3 / V4 (`heltec_v3_gamebox`; over LoRa: `heltec_v3_gamebox_lora`) | XIAO ESP32-S3 (`xiao_gamebox`) | Pico 2 W (`pico2w_fobproxy`) |
+|---|---|---|---|
+| Radio | Wi-Fi, or LoRa (915.0 MHz, SF9) | Wi-Fi | Wi-Fi |
+| Node | `0x0301` | `0x0302` | `0x0304` |
+| Box port: proxy TX → box RX | GPIO 40 (J3-9) | GPIO 43 (D6) | GP0 (pin 1) |
+| Box port: box TX → proxy RX | GPIO 39 (J3-10) | GPIO 44 (D7) | GP1 (pin 2) |
+| Logs in with | PRG, on the board | a push button from D0 (GPIO 1) to GND | a fob on an RDM6300: its TX through a 10 kΩ/20 kΩ divider to GP5 (pin 7), +5V from VBUS (`hardware/pico2w`) |
+| Shows the state on | the OLED | the user LED: blinking, no link; off, ready; flickering, waiting for the game; on, logged in | the onboard LED, as the XIAO's |
 
 **Node addresses.** Each proxy board has its own node address, and two running boards must never share one. Each has its own key and frame counter, and a gateway drops the frames of whichever board's counter is behind as replays (roclink-gateway OPERATIONS.md, "Troubleshooting"): that board gets no ACKs, though the gateway is up.
 
@@ -202,13 +204,14 @@ A trigger needs a session (`no_session` otherwise), and one waiting for the game
 | `0x0301` | the Heltec | `heltec_v3_gamebox`, `heltec_v3_gamebox_lora`, `heltec_v4_gamebox` | `f0b00301` |
 | `0x0302` | a XIAO with a login button | `xiao_gamebox` | `f0b00302` |
 | `0x0303` | a XIAO with no button, logging in by itself | `xiao_gamebox_auto` | `f0b00303` |
+| `0x0304` | a Pico 2 W with an RDM6300 | `pico2w_fobproxy` | none: the tapped fob's ID |
 
-The Heltec's builds share `0x0301` because they're one board. For another proxy, take the next address (`0x0304`), and:
+The Heltec's builds share `0x0301` because they're one board. For another proxy, take the next address (`0x0305`), and:
 
-1. its key: `python3 tools/provision.py --demo 0304` in roclink-rfc, as another `#elif` in `config.h` (or your own master's key in `secrets.h`);
-2. its build: a `platformio.ini` environment with `-D ROCLINK_NODE=0x0304`;
+1. its key: `python3 tools/provision.py --demo 0305` in roclink-rfc, as another `#elif` in `config.h` (or your own master's key in `secrets.h`);
+2. its build: a `platformio.ini` environment with `-D ROCLINK_NODE=0x0305`;
 3. the hub: the address in the `scavbox` `[[node]]` list of `hub.toml` (roclink-hubhost `roles/apps/templates/hub.toml.j2`, and roclink-bench's);
-4. the game: a `[[box]]` with `node = 0x0304` in `game.toml`, and a team with its dummy fob (`roclink scavhunt team … --token f0b00304`).
+4. the game: a `[[box]]` with `node = 0x0305` in `game.toml`, and a team with its dummy fob (`roclink scavhunt team … --token f0b00305`).
 
 The gateway needs nothing: it derives each node's key from the network's master key.
 

@@ -22,6 +22,14 @@
 // blinks with no link, is off when ready, flickers while waiting for the game,
 // and stays on while someone is logged in; the serial log has the details.
 //
+// Built with LOGIN_FOB=1 (pico2w_fobproxy) there's no button and no dummy
+// fob: a 125 kHz fob tapped on the RDM6300 logs in, and its 5-byte ID is the
+// team's token (enter it in the game: roclink scavhunt team ... --token
+// <10 hex digits>). Fobs log in: the box ends a session (solved, gave up), and
+// so does another fob tapped while it's open (that team gets an END, the box a
+// SESSION_CLOSED "revoked"), so a team that walks away never locks the box.
+// The reader is parsed by RDM6300Wrapper (lib/).
+//
 // The USB serial port is the log. Once a boxlink frame arrives there too (from
 // tools/boxsim.py), the proxy also sends the box's frames there, between log lines.
 #include <Arduino.h>
@@ -30,6 +38,13 @@
 #include "config.h"
 #include "messages.h"
 #include "rlink.h"
+
+#if LOGIN_FOB
+#include <RDM6300Wrapper.h>
+#endif
+#if defined(ARDUINO_ARCH_RP2040)
+#include <hardware/gpio.h>
+#endif
 
 #if HAS_OLED
 #include <U8g2lib.h>
@@ -56,9 +71,25 @@ static uint32_t last_ping_ms, link_retry_ms, sent_ms, last_data_ms, last_trigger
 static uint16_t session, next_session = 1;  // the session id while someone is logged in, else 0
 static uint8_t hints_taken;
 static bool auto_login = AUTO_LOGIN;  // still to log in by itself: cleared once the box is solved
+#if !LOGIN_FOB
 static bool auto_tried;
 static uint32_t auto_login_ms;        // its last try
+#endif
+// The token logins send: the dummy fob, or with LOGIN_FOB the ID of the fob
+// that was tapped. It stays for the whole session: triggers carry it.
+#if LOGIN_FOB
+static uint8_t fob[5];
+static uint8_t fob_len;
+#define GO_DETAIL "fob logged in"
+#define LOGIN_PROMPT "Tap a fob", "to log in"
+#define LOGIN_DETAIL "tap a fob"
+#else
 static const uint8_t fob[] = DUMMY_FOB;
+static const uint8_t fob_len = sizeof(fob);
+#define GO_DETAIL "hold button: log out"
+#define LOGIN_PROMPT "Press button", "to log in"
+#define LOGIN_DETAIL "press the button"
+#endif
 static char headline[22] = "Starting";
 static char detail[22] = "";
 
@@ -116,7 +147,7 @@ static void draw() {
     if (state == State::joining || state == State::linking) on = millis() / 500 % 2;
     else if (state == State::waiting) on = millis() / 80 % 2;
     else on = session != 0;
-    digitalWrite(PIN_LED, on ? LED_ON : !LED_ON);
+    digitalWrite(PIN_LED, on == (LED_ON == HIGH) ? HIGH : LOW);  // LED_ON is LOW on the XIAO
 }
 #endif
 
@@ -162,7 +193,7 @@ static void open_session() {
     if (!next_session) next_session = 1;
     char label[24];
     int ll = snprintf(label, sizeof(label), "fob ");
-    for (uint8_t b : fob) ll += snprintf(label + ll, sizeof(label) - ll, "%02x", b);
+    for (uint8_t i = 0; i < fob_len; ++i) ll += snprintf(label + ll, sizeof(label) - ll, "%02x", fob[i]);
     uint8_t p[5 + sizeof(label)] = {(uint8_t)session, (uint8_t)(session >> 8), 0, 0, (uint8_t)ll};
     memcpy(p + 5, label, ll);
     Serial.printf("[boxlink] < SESSION_OPEN %u\n", session);
@@ -206,9 +237,9 @@ static void on_verdict(const uint8_t *p, size_t len) {
         case 3: snprintf(l2, sizeof(l2), "solve %04X first", arg); show("Locked", l2); good = false; break;
         case 4: show("Unknown team", "fob not entered"); good = false; break;
         case 5: show("Not running", "ask the operator"); good = false; break;
-        case 6: show("Go!", "hold button: log out"); break;
+        case 6: show("Go!", GO_DETAIL); break;
         case 7: snprintf(l2, sizeof(l2), "free in %u s", arg); show("Busy", l2); good = false; break;
-        case 8: show("No session", "press the button"); good = false; break;
+        case 8: show("No session", LOGIN_DETAIL); good = false; break;
         case 9: snprintf(l2, sizeof(l2), "show hint %u", arg); show("Hint granted", l2); break;
         case 10: snprintf(l2, sizeof(l2), "this box has %u", arg); show("No more hints", l2); good = false; break;
         default: snprintf(l2, sizeof(l2), "result %u", result); show("Verdict?", l2); good = false; break;
@@ -255,7 +286,7 @@ static const char *const NAMES[] = {"", "WIN", "START", "WRONG", "HINT", "END"};
 // for their verdict. False if the gateway didn't ACK it.
 static bool game_send(uint8_t schema, uint8_t hint) {
     uint8_t payload[24];
-    size_t n = game::box_message(payload, fob, sizeof(fob), hint);
+    size_t n = game::box_message(payload, fob, fob_len, hint);
     show("Sending...", NAMES[schema]);
     draw();
     // Waiting from before it goes out: the verdict can arrive while rlink::send()
@@ -275,6 +306,36 @@ static bool game_send(uint8_t schema, uint8_t hint) {
     return true;
 }
 
+#if LOGIN_FOB
+// A fob was tapped: log in with it. If another fob's session is open, that
+// session ends first (END to the game for that team, SESSION_CLOSED "revoked"
+// to the box), so a team that walked away never locks the box. The fob that
+// is already logged in, tapped again, changes nothing, and so does any tap
+// while a login is waiting for the game's verdict.
+static void login_fob(const uint8_t id[5], const char *hex) {
+    if (!link_up()) return show("Offline", "can't log in");
+    if (state == State::waiting) {
+        Serial.printf("[fob] %s tapped: ignored, still waiting for the game\n", hex);
+        return;
+    }
+    if (session && fob_len == 5 && !memcmp(fob, id, 5)) {
+        Serial.printf("[fob] %s tapped: already logged in (session %u)\n", hex, session);
+        return show("Logged in", "box ends it");
+    }
+    if (session) {
+        Serial.printf("[fob] %s tapped: ending session %u first (fob ", hex, session);
+        for (uint8_t i = 0; i < fob_len; ++i) Serial.printf("%02X", fob[i]);
+        Serial.println(")");
+        bool ended = game_send(game::END, 0);  // with the old fob's token
+        close_session(CLOSED_REVOKED);
+        if (!ended) return;  // no link: game_send() said so; the game times that session out
+    }
+    memcpy(fob, id, 5);
+    fob_len = 5;
+    Serial.printf("[game] fob %s: logging in\n", hex);
+    game_send(game::START, 0);
+}
+#else
 static void login() {
     if (!link_up()) return show("Offline", "can't log in");
     if (state == State::waiting) return;  // one at a time
@@ -289,6 +350,7 @@ static void logout() {
     if (game_send(game::END, 0)) show("Logged out", "");
     close_session(CLOSED_REVOKED);
 }
+#endif
 
 // A game event from the box (OP_TRIGGER or OP_END_SESSION): 0, or a refusal.
 static uint8_t on_trigger(uint8_t what, uint8_t arg) {
@@ -389,6 +451,80 @@ static void on_frame(Port from, const Frame &f) {
     l = {true, f.seq, answer, millis()};
 }
 
+#if LOGIN_FOB
+// ------------------------------------------------------------------ the reader
+
+// The RDM6300 on its own UART, through the 5 V to 3.3 V divider. It sends a
+// tag's frame over and over while the tag is in the field, and nothing
+// without one; RDM6300Wrapper turns that into one event per tap (again after
+// the tag has been away SAME_CARD_MS).
+static HardwareSerial &reader_uart = Serial2;
+static RDM6300Wrapper reader(reader_uart, SAME_CARD_MS);
+
+// The reader's TX idles high, so through the divider the pin should sit at
+// 3.3 V. A weak pull-down makes a line nothing drives read low instead.
+static bool reader_line_high() {
+#if defined(ARDUINO_ARCH_RP2040)
+    return gpio_get(PIN_RDM6300_RX);
+#else
+    return digitalRead(PIN_RDM6300_RX) == HIGH;
+#endif
+}
+
+static const char *line_verdict(bool high) {
+    return high ? "HIGH: the reader is powered and its TX reaches the pin"
+                : "LOW: nothing drives it (reader unpowered, or TX not wired through the divider)";
+}
+
+static void reader_begin() {
+#if defined(ARDUINO_ARCH_RP2040)
+    Serial2.setRX(PIN_RDM6300_RX);
+    Serial2.setTX(PIN_RDM6300_TX);  // UART1 wants both; nothing is connected to it
+    Serial2.begin(RDM6300Wrapper::BAUD);
+    gpio_set_pulls(PIN_RDM6300_RX, false, true);
+#else
+    reader_uart.begin(RDM6300Wrapper::BAUD, SERIAL_8N1, PIN_RDM6300_RX, -1);
+    gpio_pullup_dis((gpio_num_t)PIN_RDM6300_RX);
+    gpio_pulldown_en((gpio_num_t)PIN_RDM6300_RX);
+#endif
+    delay(5);
+    Serial.printf("[rdm6300] TX to GPIO%d through the divider, %lu baud; line %s\n", PIN_RDM6300_RX,
+                  (unsigned long)RDM6300Wrapper::BAUD, line_verdict(reader_line_high()));
+}
+
+// Every RDM6300_REPORT_MS: what arrived from the reader or, with nothing, the line's level.
+static void reader_report() {
+#if RDM6300_DEBUG
+    static uint32_t last_ms, last_bytes, last_frames, last_bad;
+    if (millis() - last_ms < RDM6300_REPORT_MS) return;
+    last_ms = millis();
+    uint32_t bytes = reader.bytes() - last_bytes, frames = reader.frames() - last_frames,
+             bad = reader.badFrames() - last_bad;
+    last_bytes = reader.bytes();
+    last_frames = reader.frames();
+    last_bad = reader.badFrames();
+    if (!bytes) {
+        Serial.printf("[rdm6300] last %lus: no bytes (normal without a tag); line %s\n",
+                      (unsigned long)(RDM6300_REPORT_MS / 1000), line_verdict(reader_line_high()));
+        return;
+    }
+    Serial.printf("[rdm6300] last %lus: %lu bytes, %lu tag frames, %lu bad frames\n",
+                  (unsigned long)(RDM6300_REPORT_MS / 1000), (unsigned long)bytes, (unsigned long)frames,
+                  (unsigned long)bad);
+#endif
+}
+
+static void read_fob() {
+    if (reader.read()) {
+        uint8_t id[5];
+        reader.lastCardBytes(id);
+        Serial.printf("[rdm6300] fob %s (EM4100: id %lu)\n", reader.lastCardHex(),
+                      (unsigned long)reader.lastCardNumber());
+        login_fob(id, reader.lastCardHex());
+    }
+    reader_report();
+}
+#else
 // The login button: a short press logs in, held LOGOUT_HOLD_MS logs out.
 static void read_button() {
     static bool down, handled;
@@ -406,6 +542,7 @@ static void read_button() {
         if (!handled && millis() - since >= 30) login();  // shorter is contact bounce
     }
 }
+#endif
 
 static void read_frames() {
     static boxlink::Decoder from_box, from_usb;
@@ -424,11 +561,21 @@ static void read_frames() {
 
 void setup() {
     Serial.begin(115200);
+#if defined(ARDUINO_ARCH_RP2040)
+    Serial1.setTX(PIN_BOX_TX);
+    Serial1.setRX(PIN_BOX_RX);
+    Serial1.begin(BOX_BAUD);
+#else
     box.begin(BOX_BAUD, SERIAL_8N1, PIN_BOX_RX, PIN_BOX_TX);
+#endif
     delay(200);
-    Serial.printf("\n[scavbox] firmware %04X, node %02X/%04X, dummy fob ", FW_VERSION, ROCLINK_NET,
-                  ROCLINK_NODE);
-    for (uint8_t b : fob) Serial.printf("%02x", b);
+    Serial.printf("\n[scavbox] firmware %04X, node %02X/%04X, ", FW_VERSION, ROCLINK_NET, ROCLINK_NODE);
+#if LOGIN_FOB
+    Serial.print("logins: a tapped fob");
+#else
+    Serial.print("dummy fob ");
+    for (uint8_t i = 0; i < fob_len; ++i) Serial.printf("%02x", fob[i]);
+#endif
     Serial.printf("; box port RX GPIO%d, TX GPIO%d\n", PIN_BOX_RX, PIN_BOX_TX);
 
 #if HAS_OLED
@@ -442,7 +589,11 @@ void setup() {
 #ifdef PIN_BUZZER
     pinMode(PIN_BUZZER, OUTPUT);
 #endif
+#if LOGIN_FOB
+    reader_begin();
+#else
     pinMode(PIN_BUTTON, INPUT_PULLUP);
+#endif
 
     if (!rlink::begin(on_downlink)) show("Security failed", "see serial log");
     else show("Starting", rlink::describe());
@@ -465,7 +616,7 @@ void loop() {
                 Serial.println("[scavbox] PING ACKed: ready");
                 if (session) show("Linked", "session kept");
                 else if (auto_login) show("Linked", "logging in");
-                else show("Press button", "to log in");
+                else show(LOGIN_PROMPT);
                 link_retry_ms = 0;
                 last_ping_ms = millis();
                 set_state(State::idle);
@@ -490,6 +641,7 @@ void loop() {
                 Serial.printf("[link] PING: %s\n", ok ? "ACKed" : "no ACK");
                 if (!ok) set_state(State::linking);
             }
+#if !LOGIN_FOB
             if (state == State::idle && auto_login && !session &&
                 (!auto_tried || millis() - auto_login_ms >= AUTO_LOGIN_RETRY_MS)) {
                 auto_tried = true;
@@ -497,9 +649,14 @@ void loop() {
                 Serial.println("[game] logging in by itself (AUTO_LOGIN)");
                 login();
             }
+#endif
             break;
     }
+#if LOGIN_FOB
+    read_fob();
+#else
     read_button();
+#endif
     read_frames();
     draw();
 }
