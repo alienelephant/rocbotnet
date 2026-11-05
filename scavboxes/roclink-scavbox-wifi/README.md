@@ -70,6 +70,36 @@ roclink scavhunt start
 
 The XIAO's LED blinks while it has no link to the gateway, and flickers while it waits for the game. Its serial log shows every frame both ways (`[boxlink] >` and `<`).
 
+## On a XIAO ESP32-S3, behind the Pico 2 W fob proxy
+
+The same box, built for a XIAO ESP32-S3 (`pio run -e xiao`): a push button on D0 is the puzzle, and holding it **5 s** wins. Behind the Pico 2 W fob proxy (rfidprox `pico2w_fobproxy`, node `0x0304`, the game's **Gate** box), a team logs in by tapping its 125 kHz fob on the proxy's RDM6300 instead of pressing a button.
+
+| Pico 2 W (proxy) | | XIAO ESP32-S3 (box) |
+|---|---|---|
+| GP0, pin 1 (UART0 TX) | → | D7 (GPIO 44, RX) |
+| GP1, pin 2 (UART0 RX) | ← | D6 (GPIO 43, TX) |
+| GND | — | GND |
+| | | D0 (GPIO 1) → push button → GND |
+
+Both are 3.3 V; power each from its own USB and don't join their 3V3 pins. The proxy's own wiring (the RDM6300 and its divider) is in rfidprox `hardware/pico2w`.
+
+```bash
+pio run -e xiao -t upload && pio device monitor -e xiao                       # the box
+cd ../../rfidproxies/rfidprox/firmware
+pio run -e pico2w_fobproxy -t upload && pio device monitor -e pico2w_fobproxy  # the proxy
+roclink scavhunt team red --name "Red" --token 0f00a1b2c3                     # each team: its fob's ID, from the proxy's log
+```
+
+| Do | The box's log | The scoreboard |
+|---|---|---|
+| press the button | `press 1 (180 ms): refused: no one is logged in at the proxy` | |
+| tap a team's fob on the proxy | `a team logged in: play!`, the XIAO's LED on | "Red started playing Gate" |
+| press the button | `press 1 (180 ms): OK` | the Gate card shows `presses 1 · held_ms 180` |
+| hold it 5 s | `press 2 (5000 ms): OK`, then `the game says: solved` | `presses 2 · held_ms 5000`, then "Red solved Gate" |
+| tap another team's fob while one plays | `session over`, then `a team logged in: play!` | the first team's session ends; the second starts |
+
+Every press is reported, the winning one included, while a team is logged in. With no one logged in the proxy refuses presses and nothing leaves it; at most four presses a second get through (faster ones are refused as busy). A session ends when the box is solved, or when another team's fob is tapped; the same fob tapped again changes nothing. If the proxy is still joining Wi-Fi when the box starts, the box's keepalive finds it within 5 s.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
